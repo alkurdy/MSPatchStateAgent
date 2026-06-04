@@ -15,6 +15,8 @@
     /SmtpTo:<string>      - Recipient address for SMTP fallback (e.g. reports@corp.local)
     /SmtpFrom:<string>    - Sender address (optional, defaults to psa@<hostname>.local)
     /SmtpPort:<int>       - SMTP port (optional, defaults to 25)
+    /HistoryLimit:<int>   - Maximum number of historical runs to retain in logs (optional, defaults to 30)
+    /MaxDisplayChanges:<int> - Default number of changes to display in dashboard (optional, defaults to 50)
 
 .EXAMPLE
     choco install patchstateagent --params "/ServerTag:SQL /SmbPath:\\fileserver\reports /SmtpServer:smtp.corp.local /SmtpTo:ops@corp.local"
@@ -46,6 +48,8 @@ $SmtpServer = if ($PackageParams['SmtpServer']) { $PackageParams['SmtpServer'] }
 $SmtpTo     = if ($PackageParams['SmtpTo'])     { $PackageParams['SmtpTo']     } else { '' }
 $SmtpFrom   = if ($PackageParams['SmtpFrom'])   { $PackageParams['SmtpFrom']   } else { '' }
 $SmtpPort   = if ($PackageParams['SmtpPort'])   { [int]$PackageParams['SmtpPort'] } else { 25 }
+$HistoryLimit  = if ($PackageParams['HistoryLimit']) { [int]$PackageParams['HistoryLimit'] } else { 30 }
+$MaxDisplayChanges = if ($PackageParams['MaxDisplayChanges']) { [int]$PackageParams['MaxDisplayChanges'] } else { 50 }
 
 Write-Host "[$packageName] Installing PatchStateAgent..."
 
@@ -77,16 +81,18 @@ if (-not (Test-Path $RegConfig)) {
 
 # Write config values (idempotent - update on re-install)
 $ConfigValues = @{
-    ServerTag  = $ServerTag
-    SmbPath    = $SmbPath
-    SmtpServer = $SmtpServer
-    SmtpTo     = $SmtpTo
-    SmtpFrom   = $SmtpFrom
-    SmtpPort   = $SmtpPort
+    ServerTag         = $ServerTag
+    SmbPath           = $SmbPath
+    SmtpServer        = $SmtpServer
+    SmtpTo            = $SmtpTo
+    SmtpFrom          = $SmtpFrom
+    SmtpPort          = $SmtpPort
+    HistoryLimit      = $HistoryLimit
+    MaxDisplayChanges = $MaxDisplayChanges
 }
 
 foreach ($Key in $ConfigValues.Keys) {
-    $Type  = if ($Key -eq 'SmtpPort') { 'DWord' } else { 'String' }
+    $Type  = if ($Key -eq 'SmtpPort' -or $Key -eq 'HistoryLimit' -or $Key -eq 'MaxDisplayChanges') { 'DWord' } else { 'String' }
     Set-ItemProperty -Path $RegConfig -Name $Key -Value $ConfigValues[$Key] -Type $Type -Force
 }
 

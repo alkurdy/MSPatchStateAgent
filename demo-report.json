@@ -1,5 +1,6 @@
 ﻿{
     "computer_name":  "DEMO-SRV-01",
+    "max_display_changes":  50,
     "history":  [
                     {
                         "timestamp":  "2026-05-05T09:00:00Z",

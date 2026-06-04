@@ -453,7 +453,7 @@ function Compare-PatchState {
         Computes a diff between the current and previous hotfix arrays.
     .DESCRIPTION
         Returns a structured patch report object suitable for JSON export and
-        downstream AI/API consumption as defined in the spec.
+        downstream reporting/API consumption as defined in the spec.
     .OUTPUTS
         [PSCustomObject] Report payload with timestamp, summary, and diff list.
     #>

@@ -630,10 +630,22 @@
                     </svg>
                     <input type="text" id="search-bar" class="search-input" placeholder="Search by KB ID...">
                 </div>
-                <div class="filter-tabs">
-                    <button class="filter-tab active" data-filter="all">All Diffs</button>
-                    <button class="filter-tab" data-filter="added">Added</button>
-                    <button class="filter-tab" data-filter="removed">Removed</button>
+                <div style="display: flex; gap: 0.75rem; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; color: var(--text-secondary);">
+                        <span>Show:</span>
+                        <select id="limit-select" onchange="changeDisplayLimit()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--panel-border); border-radius: 8px; color: var(--text-primary); padding: 0.375rem 0.5rem; outline: none; font-family: inherit; font-size: 0.875rem; cursor: pointer;">
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="-1">All</option>
+                        </select>
+                    </div>
+                    <div class="filter-tabs">
+                        <button class="filter-tab active" data-filter="all">All Diffs</button>
+                        <button class="filter-tab" data-filter="added">Added</button>
+                        <button class="filter-tab" data-filter="removed">Removed</button>
+                    </div>
                 </div>
             </div>
 
@@ -654,6 +666,9 @@
                     <h3>No patch diffs found</h3>
                     <p>There are no additions or removals in this execution block, or search filters returned no matches.</p>
                 </div>
+                <div id="table-status" style="padding: 1rem 1.5rem; border-top: 1px solid var(--panel-border); font-size: 0.875rem; color: var(--text-secondary); text-align: center; display: none;">
+                    <!-- Showing X of Y changes -->
+                </div>
             </div>
 
             <footer>
@@ -663,7 +678,7 @@
     </div>
 
     <script>
-        const historyData = {"computer_name":"DEMO-SRV-01","history":[{"timestamp":"2026-05-05T09:00:00Z","orchestrator_override":false,"summary":{"added":15,"removed":0,"total":15},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[{"kb_id":"KB5000101","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000102","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000103","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000104","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000105","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000106","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000107","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000108","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000109","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000110","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000111","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000112","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000113","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000114","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000115","action":"added","installed_on":"2026-05-05"}]},{"timestamp":"2026-05-20T10:15:00Z","orchestrator_override":false,"summary":{"added":2,"removed":0,"total":17},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[{"kb_id":"KB5010201","action":"added","installed_on":"2026-05-20"},{"kb_id":"KB5010202","action":"added","installed_on":"2026-05-20"}]},{"timestamp":"2026-05-25T14:30:00Z","orchestrator_override":false,"summary":{"added":0,"removed":1,"total":16},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[{"kb_id":"KB5010202","action":"removed","installed_on":"2026-05-20"}]},{"timestamp":"2026-06-02T09:45:00Z","orchestrator_override":true,"summary":{"added":3,"removed":0,"total":19},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[{"kb_id":"KB5020301","action":"added","installed_on":"2026-06-02"},{"kb_id":"KB5020302","action":"added","installed_on":"2026-06-02"},{"kb_id":"KB5020303","action":"added","installed_on":"2026-06-02"}]},{"timestamp":"2026-06-04T08:00:00Z","orchestrator_override":false,"summary":{"added":0,"removed":0,"total":19},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[]}],"tag":"Production-Web","destinations":{"smb":"\\\\shared-storage.acme.corp\\reports\\Production-Web\\DEMO-SRV-01","smtp":"smtp.relay.acme.corp (to: patch-reports@acme.corp)","local":"C:\\ProgramData\\PatchStateAgent\\State"}};
+        const historyData = {"computer_name":"DEMO-SRV-01","max_display_changes":50,"history":[{"timestamp":"2026-05-05T09:00:00Z","orchestrator_override":false,"summary":{"added":15,"removed":0,"total":15},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[{"kb_id":"KB5000101","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000102","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000103","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000104","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000105","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000106","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000107","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000108","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000109","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000110","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000111","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000112","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000113","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000114","action":"added","installed_on":"2026-05-05"},{"kb_id":"KB5000115","action":"added","installed_on":"2026-05-05"}]},{"timestamp":"2026-05-20T10:15:00Z","orchestrator_override":false,"summary":{"added":2,"removed":0,"total":17},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[{"kb_id":"KB5010201","action":"added","installed_on":"2026-05-20"},{"kb_id":"KB5010202","action":"added","installed_on":"2026-05-20"}]},{"timestamp":"2026-05-25T14:30:00Z","orchestrator_override":false,"summary":{"added":0,"removed":1,"total":16},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[{"kb_id":"KB5010202","action":"removed","installed_on":"2026-05-20"}]},{"timestamp":"2026-06-02T09:45:00Z","orchestrator_override":true,"summary":{"added":3,"removed":0,"total":19},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[{"kb_id":"KB5020301","action":"added","installed_on":"2026-06-02"},{"kb_id":"KB5020302","action":"added","installed_on":"2026-06-02"},{"kb_id":"KB5020303","action":"added","installed_on":"2026-06-02"}]},{"timestamp":"2026-06-04T08:00:00Z","orchestrator_override":false,"summary":{"added":0,"removed":0,"total":19},"system_metrics":{"os_name":"Microsoft Windows Server 2025 Standard","os_version":"10.0.26100","os_build":"26100","cpu_name":"Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz","cpu_cores":8,"ram_total_gb":32,"ram_used_gb":14.2,"storage_total":500,"storage_used":214.5,"storage_pct":42.9},"diff":[]}],"tag":"Production-Web","destinations":{"smb":"\\\\shared-storage.acme.corp\\reports\\Production-Web\\DEMO-SRV-01","smtp":"smtp.relay.acme.corp (to: patch-reports@acme.corp)","local":"C:\\ProgramData\\PatchStateAgent\\State"}};
 
         const runListContainer = document.getElementById('run-list');
         const selectedTimeText = document.getElementById('selected-time');
@@ -688,6 +703,37 @@
         let currentFilter = 'all';
         let searchQuery = '';
         let hideEmpty = true;
+        let displayLimit = historyData.max_display_changes || 50;
+
+        // Initialize limit dropdown to configured value
+        const limitSelect = document.getElementById('limit-select');
+        if (limitSelect) {
+            if ([10, 25, 50, 100].indexOf(displayLimit) !== -1) {
+                limitSelect.value = displayLimit;
+            } else if (displayLimit === -1) {
+                limitSelect.value = "-1";
+            } else {
+                const opt = document.createElement('option');
+                opt.value = displayLimit;
+                opt.innerText = displayLimit;
+                opt.selected = true;
+                limitSelect.insertBefore(opt, limitSelect.firstChild);
+            }
+        }
+
+        window.changeDisplayLimit = function() {
+            const selectVal = document.getElementById('limit-select').value;
+            displayLimit = parseInt(selectVal);
+            if (activeRunIndex === -1) {
+                renderOverallTableRows(getOverallLogDiffs());
+            } else {
+                const runs = historyData.history || [];
+                const run = runs[activeRunIndex];
+                if (run) {
+                    renderTableRows(run.diff || []);
+                }
+            }
+        }
 
         // Formats ISO timestamp to human readable local string
         function formatDate(isoString) {
@@ -945,12 +991,17 @@
             if (filtered.length === 0) {
                 tableBody.innerHTML = '';
                 emptyState.style.display = 'flex';
+                document.getElementById('table-status').style.display = 'none';
                 return;
             }
 
             emptyState.style.display = 'none';
+            
+            const totalCount = filtered.length;
+            const limitCount = displayLimit === -1 ? totalCount : Math.min(displayLimit, totalCount);
+
             let rowsHtml = '';
-            for (let i = 0; i < filtered.length; i++) {
+            for (let i = 0; i < limitCount; i++) {
                 const item = filtered[i];
                 const badgeClass = item.action === 'added' ? 'badge-added' : 'badge-removed';
                 const actionText = item.action === 'added' ? 'Added' : 'Removed';
@@ -982,6 +1033,16 @@
                           '</tr>';
             }
             tableBody.innerHTML = rowsHtml;
+
+            const tableStatus = document.getElementById('table-status');
+            if (tableStatus) {
+                if (totalCount > limitCount) {
+                    tableStatus.style.display = 'block';
+                    tableStatus.innerText = 'Showing ' + limitCount + ' of ' + totalCount + ' changes. Use the "Show" dropdown to view more.';
+                } else {
+                    tableStatus.style.display = 'none';
+                }
+            }
         }
 
         // Render table rows for consolidated overall log
@@ -995,12 +1056,17 @@
             if (filtered.length === 0) {
                 tableBody.innerHTML = '';
                 emptyState.style.display = 'flex';
+                document.getElementById('table-status').style.display = 'none';
                 return;
             }
 
             emptyState.style.display = 'none';
+            
+            const totalCount = filtered.length;
+            const limitCount = displayLimit === -1 ? totalCount : Math.min(displayLimit, totalCount);
+
             let rowsHtml = '';
-            for (let i = 0; i < filtered.length; i++) {
+            for (let i = 0; i < limitCount; i++) {
                 const item = filtered[i];
                 const badgeClass = item.action === 'added' ? 'badge-added' : 'badge-removed';
                 const actionText = item.action === 'added' ? 'Added' : 'Removed';
@@ -1034,6 +1100,16 @@
                           '</tr>';
             }
             tableBody.innerHTML = rowsHtml;
+
+            const tableStatus = document.getElementById('table-status');
+            if (tableStatus) {
+                if (totalCount > limitCount) {
+                    tableStatus.style.display = 'block';
+                    tableStatus.innerText = 'Showing ' + limitCount + ' of ' + totalCount + ' changes. Use the "Show" dropdown to view more.';
+                } else {
+                    tableStatus.style.display = 'none';
+                }
+            }
         }
 
         // Copy KB ID to clipboard

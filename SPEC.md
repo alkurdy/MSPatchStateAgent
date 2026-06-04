@@ -43,7 +43,7 @@ The agent checks for an execution lock file or registry key (to honor Windmill o
 
 * **Commit Generation:** Captures `Get-HotFix` property arrays, strips noisy fields, and serializes them to a localized `current_state.json`.
 * **Diff Generation:** Performs a reference comparison against `previous_state.json`.
-* **Structured Output:** Generates a unified JSON payload (`patch_report.json`) designed for consumption by downstream AI models, APIs, or static HTML generators.
+* **Structured Output:** Generates a unified JSON payload (`patch_report.json`) designed for consumption by downstream reporting systems, APIs, or static HTML generators.
 
 ```json
 {
@@ -98,9 +98,14 @@ The project will deploy cleanly via Chocolatey using package parameters for easy
 
 ### Package Parameters Supported
 
-* `/ServerTag: <string>` (Categorizes the server e.g., Web, DMZ, SQL)
-* `/SmbPath: <string>` (Target UNC path)
-* `/SmtpServer: <string>` (Fallback SMTP relay server)
+* `/ServerTag: <string>` - Categorizes the server (e.g., Web, DMZ, SQL. Default: `Untagged`)
+* `/SmbPath: <string>` - Target UNC path for report delivery (e.g., `\\unc\share\reports`. Default: empty)
+* `/SmtpServer: <string>` - Fallback SMTP relay server (e.g., `smtp.corp.local`. Default: empty)
+* `/SmtpTo: <string>` - Recipient address for SMTP fallback (e.g., `reports@corp.local`. Default: empty)
+* `/SmtpFrom: <string>` - Sender address for SMTP fallback (e.g., `psa@<hostname>.local`. Default: auto-generated)
+* `/SmtpPort: <int>` - SMTP port for fallback relay (e.g., `25`. Default: `25`)
+* `/HistoryLimit: <int>` - Maximum number of historical runs to retain in history logs (e.g., `30`. Default: `30`)
+* `/MaxDisplayChanges: <int>` - Default number of changes to display in dashboard (e.g., `50`. Default: `50`)
 
 ### Install Script Routine (`chocolateyInstall.ps1`)
 

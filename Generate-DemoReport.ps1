@@ -107,14 +107,15 @@ $MockHistory += [PSCustomObject]@{
 }
 
 $DemoHistoryData = @{
-    computer_name = "DEMO-SRV-01"
-    tag           = "Production-Web"
-    destinations  = [PSCustomObject]@{
+    computer_name       = "DEMO-SRV-01"
+    tag                 = "Production-Web"
+    max_display_changes = 50
+    destinations        = [PSCustomObject]@{
         smb   = "\\shared-storage.acme.corp\reports\Production-Web\DEMO-SRV-01"
         smtp  = "smtp.relay.acme.corp (to: patch-reports@acme.corp)"
         local = "C:\ProgramData\PatchStateAgent\State"
     }
-    history       = $MockHistory
+    history             = $MockHistory
 }
 
 $DestJson = Join-Path $PSScriptRoot 'demo-report.json'
