@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>patchstateagent</id>
+    <version>1.0.0</version>
+    <title>PatchStateAgent</title>
+    <authors>alkurdy</authors>
+    <owners>alkurdy</owners>
+    <projectUrl>https://github.com/alkurdy/MSPatchStateAgent</projectUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>PatchStateAgent (PSA) is a lightweight, zero-dependency PowerShell-based agent designed to capture Windows patch installation states, compute diffs, and export reports via SMB, SMTP, or local cache fallback.</description>
+    <summary>Captures Windows patch states and exports structured JSON reports.</summary>
+    <tags>powershell patch windows update agent git diff</tags>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+    <!-- Include the main agent script so chocolateyInstall.ps1 can deploy it -->
+    <file src="..\src\PatchStateAgent.ps1" target="tools" />
+  </files>
+</package>
