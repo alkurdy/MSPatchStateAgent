@@ -1,0 +1,232 @@
+﻿{
+    "computer_name":  "DEMO-SRV-01",
+    "history":  [
+                    {
+                        "timestamp":  "2026-05-05T09:00:00Z",
+                        "orchestrator_override":  false,
+                        "summary":  {
+                                        "added":  15,
+                                        "removed":  0,
+                                        "total":  15
+                                    },
+                        "system_metrics":  {
+                                               "os_name":  "Microsoft Windows Server 2025 Standard",
+                                               "os_version":  "10.0.26100",
+                                               "os_build":  "26100",
+                                               "cpu_name":  "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+                                               "cpu_cores":  8,
+                                               "ram_total_gb":  32,
+                                               "ram_used_gb":  14.2,
+                                               "storage_total":  500,
+                                               "storage_used":  214.5,
+                                               "storage_pct":  42.9
+                                           },
+                        "diff":  [
+                                     {
+                                         "kb_id":  "KB5000101",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000102",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000103",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000104",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000105",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000106",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000107",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000108",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000109",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000110",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000111",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000112",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000113",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000114",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     },
+                                     {
+                                         "kb_id":  "KB5000115",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-05"
+                                     }
+                                 ]
+                    },
+                    {
+                        "timestamp":  "2026-05-20T10:15:00Z",
+                        "orchestrator_override":  false,
+                        "summary":  {
+                                        "added":  2,
+                                        "removed":  0,
+                                        "total":  17
+                                    },
+                        "system_metrics":  {
+                                               "os_name":  "Microsoft Windows Server 2025 Standard",
+                                               "os_version":  "10.0.26100",
+                                               "os_build":  "26100",
+                                               "cpu_name":  "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+                                               "cpu_cores":  8,
+                                               "ram_total_gb":  32,
+                                               "ram_used_gb":  14.2,
+                                               "storage_total":  500,
+                                               "storage_used":  214.5,
+                                               "storage_pct":  42.9
+                                           },
+                        "diff":  [
+                                     {
+                                         "kb_id":  "KB5010201",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-20"
+                                     },
+                                     {
+                                         "kb_id":  "KB5010202",
+                                         "action":  "added",
+                                         "installed_on":  "2026-05-20"
+                                     }
+                                 ]
+                    },
+                    {
+                        "timestamp":  "2026-05-25T14:30:00Z",
+                        "orchestrator_override":  false,
+                        "summary":  {
+                                        "added":  0,
+                                        "removed":  1,
+                                        "total":  16
+                                    },
+                        "system_metrics":  {
+                                               "os_name":  "Microsoft Windows Server 2025 Standard",
+                                               "os_version":  "10.0.26100",
+                                               "os_build":  "26100",
+                                               "cpu_name":  "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+                                               "cpu_cores":  8,
+                                               "ram_total_gb":  32,
+                                               "ram_used_gb":  14.2,
+                                               "storage_total":  500,
+                                               "storage_used":  214.5,
+                                               "storage_pct":  42.9
+                                           },
+                        "diff":  [
+                                     {
+                                         "kb_id":  "KB5010202",
+                                         "action":  "removed",
+                                         "installed_on":  "2026-05-20"
+                                     }
+                                 ]
+                    },
+                    {
+                        "timestamp":  "2026-06-02T09:45:00Z",
+                        "orchestrator_override":  true,
+                        "summary":  {
+                                        "added":  3,
+                                        "removed":  0,
+                                        "total":  19
+                                    },
+                        "system_metrics":  {
+                                               "os_name":  "Microsoft Windows Server 2025 Standard",
+                                               "os_version":  "10.0.26100",
+                                               "os_build":  "26100",
+                                               "cpu_name":  "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+                                               "cpu_cores":  8,
+                                               "ram_total_gb":  32,
+                                               "ram_used_gb":  14.2,
+                                               "storage_total":  500,
+                                               "storage_used":  214.5,
+                                               "storage_pct":  42.9
+                                           },
+                        "diff":  [
+                                     {
+                                         "kb_id":  "KB5020301",
+                                         "action":  "added",
+                                         "installed_on":  "2026-06-02"
+                                     },
+                                     {
+                                         "kb_id":  "KB5020302",
+                                         "action":  "added",
+                                         "installed_on":  "2026-06-02"
+                                     },
+                                     {
+                                         "kb_id":  "KB5020303",
+                                         "action":  "added",
+                                         "installed_on":  "2026-06-02"
+                                     }
+                                 ]
+                    },
+                    {
+                        "timestamp":  "2026-06-04T08:00:00Z",
+                        "orchestrator_override":  false,
+                        "summary":  {
+                                        "added":  0,
+                                        "removed":  0,
+                                        "total":  19
+                                    },
+                        "system_metrics":  {
+                                               "os_name":  "Microsoft Windows Server 2025 Standard",
+                                               "os_version":  "10.0.26100",
+                                               "os_build":  "26100",
+                                               "cpu_name":  "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+                                               "cpu_cores":  8,
+                                               "ram_total_gb":  32,
+                                               "ram_used_gb":  14.2,
+                                               "storage_total":  500,
+                                               "storage_used":  214.5,
+                                               "storage_pct":  42.9
+                                           },
+                        "diff":  [
+
+                                 ]
+                    }
+                ],
+    "tag":  "Production-Web",
+    "destinations":  {
+                         "smb":  "\\\\shared-storage.acme.corp\\reports\\Production-Web\\DEMO-SRV-01",
+                         "smtp":  "smtp.relay.acme.corp (to: patch-reports@acme.corp)",
+                         "local":  "C:\\ProgramData\\PatchStateAgent\\State"
+                     }
+}
