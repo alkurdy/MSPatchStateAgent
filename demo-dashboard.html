@@ -520,7 +520,24 @@
             <h2>PatchStateAgent</h2>
             <p>Historical Run List</p>
         </div>
-        <div class="run-list" id="run-list">
+        <!-- Overall Change Log button -->
+        <div style="padding: 0.75rem 0.75rem 0 0.75rem;">
+            <div id="overall-log-btn" class="run-item" onclick="selectOverallLog()" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                <svg style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span style="font-weight: 700; font-size: 0.875rem;">Overall Change Log</span>
+            </div>
+        </div>
+        <div style="border-bottom: 1px solid var(--panel-border); margin: 0.5rem 0.75rem;"></div>
+        <div style="padding: 0 0.75rem 0.25rem 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em;">Individual Runs</span>
+            <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.7rem; color: var(--text-secondary); cursor: pointer; user-select: none;">
+                <input type="checkbox" id="hide-empty-check" onchange="toggleHideEmpty()" checked style="cursor: pointer; accent-color: #3b82f6;">
+                Hide Empty
+            </label>
+        </div>
+        <div class="run-list" id="run-list" style="padding-top: 0;">
             <!-- Dynamic Sidebar Items -->
         </div>
     </div>
@@ -623,7 +640,7 @@
             <div class="table-container">
                 <table id="diff-table">
                     <thead>
-                        <tr>
+                        <tr id="table-header-row">
                             <th style="width: 45%;">Hotfix / Knowledge Base</th>
                             <th style="width: 25%;">Action</th>
                             <th style="width: 30%;">Installation Date</th>
@@ -667,9 +684,10 @@
         const storageValueText = document.getElementById('storage-text');
         const storageBarFill = document.getElementById('storage-bar');
 
-        let activeRunIndex = -1;
+        let activeRunIndex = -1; // -1 represents Overall Change Log
         let currentFilter = 'all';
         let searchQuery = '';
+        let hideEmpty = true;
 
         // Formats ISO timestamp to human readable local string
         function formatDate(isoString) {
@@ -685,9 +703,26 @@
             }
         }
 
+        // Toggle visibility of empty runs
+        window.toggleHideEmpty = function() {
+            hideEmpty = document.getElementById('hide-empty-check').checked;
+            renderSidebar();
+        }
+
         // Render left sidebar list
         function renderSidebar() {
             const runs = historyData.history || [];
+            
+            // Render Overall Log button active state
+            const overallBtn = document.getElementById('overall-log-btn');
+            if (overallBtn) {
+                if (activeRunIndex === -1) {
+                    overallBtn.classList.add('active');
+                } else {
+                    overallBtn.classList.remove('active');
+                }
+            }
+
             if (runs.length === 0) {
                 runListContainer.innerHTML = '<div style="padding:1rem;color:var(--text-secondary);text-align:center;font-size:0.875rem;">No historical data available</div>';
                 return;
@@ -697,6 +732,14 @@
             let html = '';
             for (let i = runs.length - 1; i >= 0; i--) {
                 const run = runs[i];
+                const isEmpty = (run.summary.added === 0 && run.summary.removed === 0);
+                
+                // Hide empty runs if checkbox checked, but always keep latest run (i === runs.length - 1)
+                // so user can verify the script is executing successfully.
+                if (hideEmpty && isEmpty && i !== runs.length - 1) {
+                    continue;
+                }
+
                 const activeClass = i === activeRunIndex ? 'active' : '';
                 html += '<div class="run-item ' + activeClass + '" onclick="selectRun(' + i + ')">' +
                             '<div class="run-date">' + formatDate(run.timestamp) + '</div>' +
@@ -710,6 +753,13 @@
             runListContainer.innerHTML = html;
         }
 
+        // Select Overall Log view
+        window.selectOverallLog = function() {
+            activeRunIndex = -1;
+            renderSidebar();
+            renderRunDetails(-1);
+        }
+
         // Select a run from the sidebar
         window.selectRun = function(index) {
             activeRunIndex = index;
@@ -717,9 +767,110 @@
             renderRunDetails(index);
         }
 
+        // Compute overall diff list consolidated across all runs
+        function getOverallLogDiffs() {
+            const runs = historyData.history || [];
+            const allDiffs = [];
+            for (let i = 0; i < runs.length; i++) {
+                const run = runs[i];
+                const diffs = run.diff || [];
+                for (let j = 0; j < diffs.length; j++) {
+                    const item = diffs[j];
+                    allDiffs.push({
+                        kb_id: item.kb_id,
+                        action: item.action,
+                        installed_on: item.installed_on,
+                        run_timestamp: run.timestamp
+                    });
+                }
+            }
+            // Sort by run timestamp descending so newest changes are first
+            allDiffs.sort((a, b) => new Date(b.run_timestamp) - new Date(a.run_timestamp));
+            return allDiffs;
+        }
+
         // Render detail content area
         function renderRunDetails(index) {
             const runs = historyData.history || [];
+            
+            if (index === -1) {
+                selectedTimeText.innerText = 'Consolidated timeline of all patch modifications';
+                
+                let totalAdded = 0;
+                let totalRemoved = 0;
+                let latestTotal = 0;
+                let latestRun = null;
+                
+                if (runs.length > 0) {
+                    latestRun = runs[runs.length - 1];
+                    latestTotal = latestRun.summary.total;
+                    for (let i = 0; i < runs.length; i++) {
+                        totalAdded += runs[i].summary.added || 0;
+                        totalRemoved += runs[i].summary.removed || 0;
+                    }
+                }
+                
+                countAddedText.innerText = totalAdded;
+                countRemovedText.innerText = totalRemoved;
+                countTotalText.innerText = latestTotal;
+                
+                // Render resources using latest available metrics
+                const dests = historyData.destinations;
+                const latestMetrics = latestRun ? latestRun.system_metrics : null;
+                
+                if (latestMetrics || dests) {
+                    resourcesPanel.style.display = 'grid';
+                    if (latestMetrics) {
+                        osInfoText.innerText = latestMetrics.os_name + ' (Build ' + latestMetrics.os_build + ')';
+                        cpuInfoText.innerText = latestMetrics.cpu_name + ' (' + latestMetrics.cpu_cores + ' cores)';
+                        
+                        const ramTotal = latestMetrics.ram_total_gb;
+                        const ramUsed = latestMetrics.ram_used_gb;
+                        const ramPct = Math.round((ramUsed / ramTotal) * 100);
+                        ramValueText.innerText = ramUsed + ' GB / ' + ramTotal + ' GB (' + ramPct + '%)';
+                        ramBarFill.style.width = ramPct + '%';
+
+                        const storageTotal = latestMetrics.storage_total;
+                        const storageUsed = latestMetrics.storage_used;
+                        const storagePct = latestMetrics.storage_pct;
+                        storageValueText.innerText = storageUsed + ' GB / ' + storageTotal + ' GB (' + storagePct + '%)';
+                        storageBarFill.style.width = storagePct + '%';
+                    } else {
+                        osInfoText.innerText = '-';
+                        cpuInfoText.innerText = '-';
+                        ramValueText.innerText = '-';
+                        ramBarFill.style.width = '0%';
+                        storageValueText.innerText = '-';
+                        storageBarFill.style.width = '0%';
+                    }
+
+                    if (dests) {
+                        document.getElementById('dest-smb').innerText = 'SMB: ' + (dests.smb || 'Not Configured');
+                        document.getElementById('dest-smtp').innerText = 'SMTP: ' + (dests.smtp || 'Not Configured');
+                        document.getElementById('dest-local').innerText = 'Local: ' + (dests.local || '-');
+                        document.getElementById('dest-smb').title = dests.smb || '';
+                        document.getElementById('dest-smtp').title = dests.smtp || '';
+                        document.getElementById('dest-local').title = dests.local || '';
+                    }
+                } else {
+                    resourcesPanel.style.display = 'none';
+                }
+
+                // Render overall diff table with 4 columns
+                const headerRow = document.getElementById('table-header-row');
+                if (headerRow) {
+                    headerRow.innerHTML = 
+                        '<th style="width: 35%;">Hotfix / Knowledge Base</th>' +
+                        '<th style="width: 20%;">Action</th>' +
+                        '<th style="width: 25%;">Change Date</th>' +
+                        '<th style="width: 20%;">Installed On</th>';
+                }
+                
+                renderOverallTableRows(getOverallLogDiffs());
+                return;
+            }
+
+            // Individual Run Selection
             const run = runs[index];
             if (!run) {
                 selectedTimeText.innerText = 'No run selected';
@@ -732,7 +883,6 @@
             countRemovedText.innerText = run.summary.removed;
             countTotalText.innerText = run.summary.total;
 
-            // Render resources and destinations if present
             const dests = run.destinations || historyData.destinations;
             if (run.system_metrics || dests) {
                 resourcesPanel.style.display = 'grid';
@@ -770,6 +920,15 @@
                 }
             } else {
                 resourcesPanel.style.display = 'none';
+            }
+
+            // Restore original 3 columns for individual runs
+            const headerRow = document.getElementById('table-header-row');
+            if (headerRow) {
+                headerRow.innerHTML = 
+                    '<th style="width: 45%;">Hotfix / Knowledge Base</th>' +
+                    '<th style="width: 25%;">Action</th>' +
+                    '<th style="width: 30%;">Installation Date</th>';
             }
 
             renderTableRows(run.diff || []);
@@ -825,6 +984,58 @@
             tableBody.innerHTML = rowsHtml;
         }
 
+        // Render table rows for consolidated overall log
+        function renderOverallTableRows(allDiffs) {
+            const filtered = allDiffs.filter(item => {
+                const matchesFilter = currentFilter === 'all' || item.action === currentFilter;
+                const matchesSearch = item.kb_id.toLowerCase().includes(searchQuery.toLowerCase());
+                return matchesFilter && matchesSearch;
+            });
+
+            if (filtered.length === 0) {
+                tableBody.innerHTML = '';
+                emptyState.style.display = 'flex';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            let rowsHtml = '';
+            for (let i = 0; i < filtered.length; i++) {
+                const item = filtered[i];
+                const badgeClass = item.action === 'added' ? 'badge-added' : 'badge-removed';
+                const actionText = item.action === 'added' ? 'Added' : 'Removed';
+                const actionIcon = item.action === 'added' 
+                    ? '<svg style="width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>'
+                    : '<svg style="width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15" /></svg>';
+
+                const instDateStr = item.installed_on ? item.installed_on : 'Unknown';
+                const changeDateStr = formatDate(item.run_timestamp).split(',')[0]; // Only show the date part
+                const cleanKbId = item.kb_id.replace(/\D/g, '');
+
+                rowsHtml += '<tr>' +
+                            '<td>' +
+                                '<div class="kb-cell">' +
+                                    '<a href="https://support.microsoft.com/help/' + cleanKbId + '" target="_blank" class="kb-link">' + item.kb_id + '</a>' +
+                                    '<button class="copy-btn" onclick="copyToClipboard(\'' + item.kb_id + '\', this)" title="Copy KB ID">' +
+                                        '<svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2" viewBox="0 0 24 24">' +
+                                            '<path stroke-linecap="round" stroke-linejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.057 1.123-.08M15.75 18H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08M15.75 18.75v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5A3.375 3.375 0 006.375 7.5H5.25m11.9-3.664A2.251 2.251 0 0015 2.25h-1.5a2.251 2.251 0 00-2.15 1.586m5.8 0c.065.21.1.433.1.664v.75h-6V4.5c0-.231.035-.454.1-.664M6.75 7.5H4.875c-.621 0-1.125.504-1.125 1.125v12c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V16.5a9 9 0 00-9-9z" />' +
+                                        '</svg>' +
+                                    '</button>' +
+                                '</div>' +
+                            '</td>' +
+                            '<td>' +
+                                '<span class="badge-action ' + badgeClass + '">' +
+                                    actionIcon +
+                                    ' <span style="margin-left: 0.25rem;">' + actionText + '</span>' +
+                                '</span>' +
+                            '</td>' +
+                            '<td>' + changeDateStr + '</td>' +
+                            '<td class="installed-date">' + instDateStr + '</td>' +
+                          '</tr>';
+            }
+            tableBody.innerHTML = rowsHtml;
+        }
+
         // Copy KB ID to clipboard
         window.copyToClipboard = function(text, btn) {
             navigator.clipboard.writeText(text).then(() => {
@@ -841,10 +1052,14 @@
         // Search hook
         searchBar.addEventListener('input', (e) => {
             searchQuery = e.target.value;
-            const runs = historyData.history || [];
-            const run = runs[activeRunIndex];
-            if (run) {
-                renderTableRows(run.diff || []);
+            if (activeRunIndex === -1) {
+                renderOverallTableRows(getOverallLogDiffs());
+            } else {
+                const runs = historyData.history || [];
+                const run = runs[activeRunIndex];
+                if (run) {
+                    renderTableRows(run.diff || []);
+                }
             }
         });
 
@@ -854,10 +1069,14 @@
                 filterTabs.forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 currentFilter = tab.getAttribute('data-filter');
-                const runs = historyData.history || [];
-                const run = runs[activeRunIndex];
-                if (run) {
-                    renderTableRows(run.diff || []);
+                if (activeRunIndex === -1) {
+                    renderOverallTableRows(getOverallLogDiffs());
+                } else {
+                    const runs = historyData.history || [];
+                    const run = runs[activeRunIndex];
+                    if (run) {
+                        renderTableRows(run.diff || []);
+                    }
                 }
             });
         });
@@ -875,13 +1094,8 @@
             }
         }
 
-        // Initialize display to latest run
-        const totalRuns = (historyData.history || []).length;
-        if (totalRuns > 0) {
-            selectRun(totalRuns - 1);
-        } else {
-            renderSidebar();
-        }
+        // Initialize display to Overall Change Log
+        selectOverallLog();
     </script>
 </body>
 </html>
