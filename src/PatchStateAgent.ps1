@@ -27,7 +27,9 @@
 param (
     [switch]$SimulateSmbFailure,
     [switch]$SimulateSmtpFailure,
-    [switch]$BypassOrchestratorCheck
+    [switch]$BypassOrchestratorCheck,
+    [int]$HistoryLimit,
+    [int]$MaxDisplayChanges
 )
 
 Set-StrictMode -Version Latest
@@ -1370,10 +1372,22 @@ function Export-PatchHtml {
                     </svg>
                     <input type="text" id="search-bar" class="search-input" placeholder="Search by KB ID...">
                 </div>
-                <div class="filter-tabs">
-                    <button class="filter-tab active" data-filter="all">All Diffs</button>
-                    <button class="filter-tab" data-filter="added">Added</button>
-                    <button class="filter-tab" data-filter="removed">Removed</button>
+                <div style="display: flex; gap: 0.75rem; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; color: var(--text-secondary);">
+                        <span>Show:</span>
+                        <select id="limit-select" onchange="changeDisplayLimit()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--panel-border); border-radius: 8px; color: var(--text-primary); padding: 0.375rem 0.5rem; outline: none; font-family: inherit; font-size: 0.875rem; cursor: pointer;">
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="-1">All</option>
+                        </select>
+                    </div>
+                    <div class="filter-tabs">
+                        <button class="filter-tab active" data-filter="all">All Diffs</button>
+                        <button class="filter-tab" data-filter="added">Added</button>
+                        <button class="filter-tab" data-filter="removed">Removed</button>
+                    </div>
                 </div>
             </div>
 
@@ -1393,6 +1407,9 @@ function Export-PatchHtml {
                 <div id="empty-state" class="empty-state" style="display: none;">
                     <h3>No patch diffs found</h3>
                     <p>There are no additions or removals in this execution block, or search filters returned no matches.</p>
+                </div>
+                <div id="table-status" style="padding: 1rem 1.5rem; border-top: 1px solid var(--panel-border); font-size: 0.875rem; color: var(--text-secondary); text-align: center; display: none;">
+                    <!-- Showing X of Y changes -->
                 </div>
             </div>
 
@@ -1428,6 +1445,37 @@ function Export-PatchHtml {
         let currentFilter = 'all';
         let searchQuery = '';
         let hideEmpty = true;
+        let displayLimit = historyData.max_display_changes || 50;
+
+        // Initialize limit dropdown to configured value
+        const limitSelect = document.getElementById('limit-select');
+        if (limitSelect) {
+            if ([10, 25, 50, 100].indexOf(displayLimit) !== -1) {
+                limitSelect.value = displayLimit;
+            } else if (displayLimit === -1) {
+                limitSelect.value = "-1";
+            } else {
+                const opt = document.createElement('option');
+                opt.value = displayLimit;
+                opt.innerText = displayLimit;
+                opt.selected = true;
+                limitSelect.insertBefore(opt, limitSelect.firstChild);
+            }
+        }
+
+        window.changeDisplayLimit = function() {
+            const selectVal = document.getElementById('limit-select').value;
+            displayLimit = parseInt(selectVal);
+            if (activeRunIndex === -1) {
+                renderOverallTableRows(getOverallLogDiffs());
+            } else {
+                const runs = historyData.history || [];
+                const run = runs[activeRunIndex];
+                if (run) {
+                    renderTableRows(run.diff || []);
+                }
+            }
+        }
 
         // Formats ISO timestamp to human readable local string
         function formatDate(isoString) {
@@ -1883,10 +1931,15 @@ if (-not $global:PatchStateAgentTestMode) {
         $HistoryJsonFile = Join-Path $Script:StateDir "$($env:COMPUTERNAME)-report.json"
         $HistoryHtmlFile = Join-Path $Script:StateDir "$($env:COMPUTERNAME)-dashboard.html"
 
+        # Resolve configuration values (registry config with parameter override/fallback)
+        $HistoryLimitValue = if ($PSBoundParameters.ContainsKey('HistoryLimit')) { $HistoryLimit } else { Get-RegistryConfig -ValueName 'HistoryLimit' -DefaultValue 30 }
+        $MaxDisplayChangesValue = if ($PSBoundParameters.ContainsKey('MaxDisplayChanges')) { $MaxDisplayChanges } else { Get-RegistryConfig -ValueName 'MaxDisplayChanges' -DefaultValue 50 }
+
         $HistoryData = @{
-            computer_name = $env:COMPUTERNAME
-            tag           = (Get-RegistryConfig -ValueName 'ServerTag' -DefaultValue 'Untagged')
-            destinations  = [PSCustomObject]@{
+            computer_name       = $env:COMPUTERNAME
+            tag                 = (Get-RegistryConfig -ValueName 'ServerTag' -DefaultValue 'Untagged')
+            max_display_changes = $MaxDisplayChangesValue
+            destinations        = [PSCustomObject]@{
                 smb   = (Get-RegistryConfig -ValueName 'SmbPath' -DefaultValue 'Not Configured')
                 smtp  = if (Get-RegistryConfig -ValueName 'SmtpServer') { 
                             "$((Get-RegistryConfig -ValueName 'SmtpServer')) (to: $((Get-RegistryConfig -ValueName 'SmtpTo')))" 
@@ -1895,7 +1948,7 @@ if (-not $global:PatchStateAgentTestMode) {
                         }
                 local = $Script:StateDir
             }
-            history       = @()
+            history             = @()
         }
 
         if (Test-PathExists -Path $HistoryJsonFile) {
@@ -1920,14 +1973,14 @@ if (-not $global:PatchStateAgentTestMode) {
             system_metrics        = (Get-SystemMetrics)
         }
 
-        # Append and trim history to last 30 runs
+        # Append and trim history
         $HistoryList = [System.Collections.Generic.List[PSCustomObject]]::new()
         foreach ($Item in $HistoryData.history) {
             $HistoryList.Add($Item)
         }
         $HistoryList.Add($NewRunReport)
 
-        while ($HistoryList.Count -gt 30) {
+        while ($HistoryList.Count -gt $HistoryLimitValue) {
             $HistoryList.RemoveAt(0)
         }
         $HistoryData.history = $HistoryList.ToArray()
