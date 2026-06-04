@@ -1733,12 +1733,17 @@ function Export-PatchHtml {
             if (filtered.length === 0) {
                 tableBody.innerHTML = '';
                 emptyState.style.display = 'flex';
+                document.getElementById('table-status').style.display = 'none';
                 return;
             }
 
             emptyState.style.display = 'none';
+            
+            const totalCount = filtered.length;
+            const limitCount = displayLimit === -1 ? totalCount : Math.min(displayLimit, totalCount);
+
             let rowsHtml = '';
-            for (let i = 0; i < filtered.length; i++) {
+            for (let i = 0; i < limitCount; i++) {
                 const item = filtered[i];
                 const badgeClass = item.action === 'added' ? 'badge-added' : 'badge-removed';
                 const actionText = item.action === 'added' ? 'Added' : 'Removed';
@@ -1770,6 +1775,16 @@ function Export-PatchHtml {
                           '</tr>';
             }
             tableBody.innerHTML = rowsHtml;
+
+            const tableStatus = document.getElementById('table-status');
+            if (tableStatus) {
+                if (totalCount > limitCount) {
+                    tableStatus.style.display = 'block';
+                    tableStatus.innerText = 'Showing ' + limitCount + ' of ' + totalCount + ' changes. Use the "Show" dropdown to view more.';
+                } else {
+                    tableStatus.style.display = 'none';
+                }
+            }
         }
 
         // Render table rows for consolidated overall log
@@ -1783,12 +1798,17 @@ function Export-PatchHtml {
             if (filtered.length === 0) {
                 tableBody.innerHTML = '';
                 emptyState.style.display = 'flex';
+                document.getElementById('table-status').style.display = 'none';
                 return;
             }
 
             emptyState.style.display = 'none';
+            
+            const totalCount = filtered.length;
+            const limitCount = displayLimit === -1 ? totalCount : Math.min(displayLimit, totalCount);
+
             let rowsHtml = '';
-            for (let i = 0; i < filtered.length; i++) {
+            for (let i = 0; i < limitCount; i++) {
                 const item = filtered[i];
                 const badgeClass = item.action === 'added' ? 'badge-added' : 'badge-removed';
                 const actionText = item.action === 'added' ? 'Added' : 'Removed';
@@ -1822,6 +1842,16 @@ function Export-PatchHtml {
                           '</tr>';
             }
             tableBody.innerHTML = rowsHtml;
+
+            const tableStatus = document.getElementById('table-status');
+            if (tableStatus) {
+                if (totalCount > limitCount) {
+                    tableStatus.style.display = 'block';
+                    tableStatus.innerText = 'Showing ' + limitCount + ' of ' + totalCount + ' changes. Use the "Show" dropdown to view more.';
+                } else {
+                    tableStatus.style.display = 'none';
+                }
+            }
         }
 
         // Copy KB ID to clipboard
