@@ -188,15 +188,15 @@ Describe 'Send-PatchReport - Cascading Transport' -Tag 'Unit' {
                 if ($ValueName -eq 'SmbPath') { return '\\server\share' }
                 return $DefaultValue
             }
-            Mock Invoke-SmbUpload   { param($ReportJson, $FileName) return $true }
-            Mock Invoke-SmtpDelivery { param($ReportJson, $FileName) return $false }
-            Mock Invoke-LocalCache  { param($ReportJson, $FileName) return $false }
+            Mock Invoke-SmbUpload   { param($JsonFilePath, $HtmlFilePath) return $true }
+            Mock Invoke-SmtpDelivery { param($JsonFilePath, $HtmlFilePath) return $false }
+            Mock Invoke-LocalCache  { param($JsonFilePath, $HtmlFilePath) return $false }
 
-            Send-PatchReport -ReportJson '{}'
+            Send-PatchReport -JsonFilePath 'c:\temp\r.json' -HtmlFilePath 'c:\temp\r.html'
 
-            Assert-MockCalled Invoke-SmbUpload   -Times 1
-            Assert-MockCalled Invoke-SmtpDelivery -Times 0
-            Assert-MockCalled Invoke-LocalCache   -Times 0
+            Assert-MockCalled Invoke-SmbUpload   -Times 1 -Scope It
+            Assert-MockCalled Invoke-SmtpDelivery -Times 0 -Scope It
+            Assert-MockCalled Invoke-LocalCache   -Times 0 -Scope It
         }
     }
 
@@ -207,27 +207,27 @@ Describe 'Send-PatchReport - Cascading Transport' -Tag 'Unit' {
                 if ($ValueName -eq 'SmtpTo') { return 'ops@corp.local' }
                 return $DefaultValue
             }
-            Mock Invoke-SmbUpload    { param($ReportJson, $FileName) return $false }
-            Mock Invoke-SmtpDelivery { param($ReportJson, $FileName) return $true }
-            Mock Invoke-LocalCache   { param($ReportJson, $FileName) return $false }
+            Mock Invoke-SmbUpload    { param($JsonFilePath, $HtmlFilePath) return $false }
+            Mock Invoke-SmtpDelivery { param($JsonFilePath, $HtmlFilePath) return $true }
+            Mock Invoke-LocalCache   { param($JsonFilePath, $HtmlFilePath) return $false }
 
-            Send-PatchReport -ReportJson '{}'
+            Send-PatchReport -JsonFilePath 'c:\temp\r.json' -HtmlFilePath 'c:\temp\r.html'
 
-            Assert-MockCalled Invoke-SmbUpload    -Times 1
-            Assert-MockCalled Invoke-SmtpDelivery -Times 1
-            Assert-MockCalled Invoke-LocalCache   -Times 0
+            Assert-MockCalled Invoke-SmbUpload    -Times 1 -Scope It
+            Assert-MockCalled Invoke-SmtpDelivery -Times 1 -Scope It
+            Assert-MockCalled Invoke-LocalCache   -Times 0 -Scope It
         }
     }
 
     Context 'When both SMB and SMTP fail' {
         It 'Should write report to Local Cache as last resort' {
-            Mock Invoke-SmbUpload    { param($ReportJson, $FileName) return $false }
-            Mock Invoke-SmtpDelivery { param($ReportJson, $FileName) return $false }
-            Mock Invoke-LocalCache   { param($ReportJson, $FileName) return $true }
+            Mock Invoke-SmbUpload    { param($JsonFilePath, $HtmlFilePath) return $false }
+            Mock Invoke-SmtpDelivery { param($JsonFilePath, $HtmlFilePath) return $false }
+            Mock Invoke-LocalCache   { param($JsonFilePath, $HtmlFilePath) return $true }
 
-            Send-PatchReport -ReportJson '{}'
+            Send-PatchReport -JsonFilePath 'c:\temp\r.json' -HtmlFilePath 'c:\temp\r.html'
 
-            Assert-MockCalled Invoke-LocalCache -Times 1
+            Assert-MockCalled Invoke-LocalCache -Times 1 -Scope It
         }
     }
 
@@ -235,14 +235,14 @@ Describe 'Send-PatchReport - Cascading Transport' -Tag 'Unit' {
         It 'Should bypass SMB and attempt SMTP first' {
             $Script:SimulateSmbFailure = $true
 
-            Mock Invoke-SmbUpload    { param($ReportJson, $FileName) return $false }
-            Mock Invoke-SmtpDelivery { param($ReportJson, $FileName) return $true }
-            Mock Invoke-LocalCache   { param($ReportJson, $FileName) return $false }
+            Mock Invoke-SmbUpload    { param($JsonFilePath, $HtmlFilePath) return $false }
+            Mock Invoke-SmtpDelivery { param($JsonFilePath, $HtmlFilePath) return $true }
+            Mock Invoke-LocalCache   { param($JsonFilePath, $HtmlFilePath) return $false }
 
-            Send-PatchReport -ReportJson '{}'
+            Send-PatchReport -JsonFilePath 'c:\temp\r.json' -HtmlFilePath 'c:\temp\r.html'
 
-            Assert-MockCalled Invoke-SmbUpload   -Times 0
-            Assert-MockCalled Invoke-SmtpDelivery -Times 1
+            Assert-MockCalled Invoke-SmbUpload   -Times 0 -Scope It
+            Assert-MockCalled Invoke-SmtpDelivery -Times 1 -Scope It
 
             $Script:SimulateSmbFailure = $false
         }

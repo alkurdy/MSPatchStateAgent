@@ -1,0 +1,8 @@
+# Ignore temporary testing files in workspace
+dashboard.html
+report.json
+*.nupkg
+*.tmp
+*debug_test.ps1
+.idea/
+.vscode/

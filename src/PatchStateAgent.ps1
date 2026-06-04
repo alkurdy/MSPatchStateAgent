@@ -161,6 +161,49 @@ function Set-RegistryValue {
     Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -Force
 }
 
+function Get-SystemMetrics {
+    <#
+    .SYNOPSIS
+        Queries operating system and hardware resource metrics natively using CIM.
+    .OUTPUTS
+        [hashtable] A dictionary containing OS, CPU, RAM, and Storage info.
+    #>
+    [CmdletBinding()]
+    param ()
+
+    try {
+        $Os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $Cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $Drive = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop
+
+        $TotalRamGb = [Math]::Round($Os.TotalVisibleMemorySize / 1MB, 1)
+        $FreeRamGb = [Math]::Round($Os.FreePhysicalMemory / 1MB, 1)
+        $UsedRamGb = [Math]::Round($TotalRamGb - $FreeRamGb, 1)
+
+        $StorageTotalGb = [Math]::Round($Drive.Size / 1GB, 1)
+        $StorageFreeGb = [Math]::Round($Drive.FreeSpace / 1GB, 1)
+        $StorageUsedGb = [Math]::Round(($Drive.Size - $Drive.FreeSpace) / 1GB, 1)
+        $StoragePct = if ($StorageTotalGb -gt 0) { [Math]::Round(($StorageUsedGb / $StorageTotalGb) * 100, 1) } else { 0 }
+
+        return @{
+            os_name        = $Os.Caption
+            os_version     = $Os.Version
+            os_build       = $Os.BuildNumber
+            cpu_name       = $Cpu.Name.Trim()
+            cpu_cores      = $Cpu.NumberOfLogicalProcessors
+            ram_total_gb   = $TotalRamGb
+            ram_used_gb    = $UsedRamGb
+            storage_total  = $StorageTotalGb
+            storage_used   = $StorageUsedGb
+            storage_pct    = $StoragePct
+        }
+    }
+    catch {
+        Write-AgentLog -Level 'WARN' -Message "Failed to capture system metrics: $_"
+        return $null
+    }
+}
+
 #endregion
 
 #region --- Initialize-Environment ---
@@ -481,7 +524,7 @@ function Compare-PatchState {
 function Invoke-SmbUpload {
     <#
     .SYNOPSIS
-        Attempts to write the report JSON to the configured SMB share.
+        Attempts to write the report files to the configured SMB share.
     .DESCRIPTION
         Uses a Job with a bounded timeout to prevent indefinite network hangs.
     .OUTPUTS
@@ -490,10 +533,10 @@ function Invoke-SmbUpload {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
-        [string]$ReportJson,
+        [string]$JsonFilePath,
 
         [Parameter(Mandatory)]
-        [string]$FileName
+        [string]$HtmlFilePath
     )
 
     $SmbPath = Get-RegistryConfig -ValueName 'SmbPath' -DefaultValue ''
@@ -506,18 +549,20 @@ function Invoke-SmbUpload {
 
     # Build per-tag, per-host directory
     $TargetDir  = Join-Path $SmbPath (Join-Path $Tag $env:COMPUTERNAME)
-    $TargetFile = Join-Path $TargetDir $FileName
+    $TargetJson = Join-Path $TargetDir "$($env:COMPUTERNAME)-report.json"
+    $TargetHtml = Join-Path $TargetDir "$($env:COMPUTERNAME)-dashboard.html"
 
-    Write-AgentLog -Level 'INFO' -Message "Attempting SMB upload to: $TargetFile"
+    Write-AgentLog -Level 'INFO' -Message "Attempting SMB upload to: $TargetDir"
 
     # Run inside a bounded job to prevent indefinite network hang
     $Job = Start-Job -ScriptBlock {
-        param ($ReportJson, $TargetDir, $TargetFile)
+        param ($JsonFilePath, $HtmlFilePath, $TargetDir, $TargetJson, $TargetHtml)
         if (-not (Test-Path $TargetDir)) {
             $null = New-Item -Path $TargetDir -ItemType Directory -Force -ErrorAction Stop
         }
-        [System.IO.File]::WriteAllText($TargetFile, $ReportJson, [System.Text.Encoding]::UTF8)
-    } -ArgumentList $ReportJson, $TargetDir, $TargetFile
+        Copy-Item -Path $JsonFilePath -Destination $TargetJson -Force -ErrorAction Stop
+        Copy-Item -Path $HtmlFilePath -Destination $TargetHtml -Force -ErrorAction Stop
+    } -ArgumentList $JsonFilePath, $HtmlFilePath, $TargetDir, $TargetJson, $TargetHtml
 
     try {
         $Completed = Wait-Job -Job $Job -Timeout $Script:SmbTimeoutSec
@@ -545,17 +590,17 @@ function Invoke-SmbUpload {
 function Invoke-SmtpDelivery {
     <#
     .SYNOPSIS
-        Sends the report JSON as an email attachment to the configured ingestion mailbox.
+        Sends the report files as email attachments to the configured ingestion mailbox.
     .OUTPUTS
         [bool] $true on success, $false on failure.
     #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
-        [string]$ReportJson,
+        [string]$JsonFilePath,
 
         [Parameter(Mandatory)]
-        [string]$FileName
+        [string]$HtmlFilePath
     )
 
     $SmtpServer = Get-RegistryConfig -ValueName 'SmtpServer'    -DefaultValue ''
@@ -571,18 +616,14 @@ function Invoke-SmtpDelivery {
     Write-AgentLog -Level 'INFO' -Message "Attempting SMTP delivery via $SmtpServer to $SmtpTo..."
 
     try {
-        # Write report to a temp attachment file (Send-MailMessage requires a file path)
-        $TempAttachment = Join-Path $env:TEMP "$FileName.tmp"
-        $ReportJson | Out-File -FilePath $TempAttachment -Encoding UTF8 -Force
-
         $MailParams = @{
             SmtpServer  = $SmtpServer
             Port        = [int]$SmtpPort
             From        = $SmtpFrom
             To          = $SmtpTo
-            Subject     = "[$Script:AgentName] Patch Report - $($env:COMPUTERNAME) - $(Get-Date -Format 'yyyy-MM-dd')"
-            Body        = "PatchStateAgent report attached as JSON. Computer: $($env:COMPUTERNAME)"
-            Attachments = $TempAttachment
+            Subject     = "[$Script:AgentName] Patch History Report - $($env:COMPUTERNAME)"
+            Body        = "PatchStateAgent report files attached (JSON and HTML). Computer: $($env:COMPUTERNAME)"
+            Attachments = @($JsonFilePath, $HtmlFilePath)
             ErrorAction = 'Stop'
         }
 
@@ -594,33 +635,34 @@ function Invoke-SmtpDelivery {
         Write-AgentLog -Level 'WARN' -Message "SMTP delivery failed: $_"
         return $false
     }
-    finally {
-        if (Test-Path $TempAttachment) { Remove-Item -Path $TempAttachment -Force -ErrorAction SilentlyContinue }
-    }
 }
 
 function Invoke-LocalCache {
     <#
     .SYNOPSIS
-        Saves the report JSON to the local undelivered cache as a last resort.
+        Saves the report files to the local undelivered cache as a last resort.
     .OUTPUTS
         [bool] $true on success, $false on failure.
     #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
-        [string]$ReportJson,
+        [string]$JsonFilePath,
 
         [Parameter(Mandatory)]
-        [string]$FileName
+        [string]$HtmlFilePath
     )
 
     Write-AgentLog -Level 'WARN' -Message 'All transport methods exhausted. Caching report locally.'
 
     try {
-        $TargetFile = Join-Path $Script:UndeliveredDir $FileName
-        $ReportJson | Out-File -FilePath $TargetFile -Encoding UTF8 -Force -ErrorAction Stop
-        Write-AgentLog -Level 'WARN' -Message "Report cached locally at: $TargetFile"
+        $TargetJson = Join-Path $Script:UndeliveredDir "$($env:COMPUTERNAME)-report.json"
+        $TargetHtml = Join-Path $Script:UndeliveredDir "$($env:COMPUTERNAME)-dashboard.html"
+
+        Copy-Item -Path $JsonFilePath -Destination $TargetJson -Force -ErrorAction Stop
+        Copy-Item -Path $HtmlFilePath -Destination $TargetHtml -Force -ErrorAction Stop
+
+        Write-AgentLog -Level 'WARN' -Message "Report cached locally at: $TargetJson and $TargetHtml"
         return $true
     }
     catch {
@@ -632,25 +674,22 @@ function Invoke-LocalCache {
 function Send-PatchReport {
     <#
     .SYNOPSIS
-        Delivers the patch report via cascading transport: SMB -> SMTP -> Local Cache.
+        Delivers the patch reports via cascading transport: SMB -> SMTP -> Local Cache.
     .DESCRIPTION
         Attempts each delivery method in priority order. Stops at the first success.
-        All transport functions return a boolean result so this function is clean
-        and easy to follow (spacecraft rule: simple control flow, no deep nesting).
     #>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
-        [string]$ReportJson
-    )
+        [string]$JsonFilePath,
 
-    # Generate a unique, timestamped filename for this report
-    $Timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $FileName  = "patch_report_$($env:COMPUTERNAME)_$Timestamp.json"
+        [Parameter(Mandatory)]
+        [string]$HtmlFilePath
+    )
 
     # Priority 1: SMB (unless simulated failure is requested)
     if (-not $Script:SimulateSmbFailure) {
-        if (Invoke-SmbUpload -ReportJson $ReportJson -FileName $FileName) { return }
+        if (Invoke-SmbUpload -JsonFilePath $JsonFilePath -HtmlFilePath $HtmlFilePath) { return }
     }
     else {
         Write-AgentLog -Level 'WARN' -Message 'SimulateSmbFailure is active - bypassing SMB upload.'
@@ -658,14 +697,878 @@ function Send-PatchReport {
 
     # Priority 2: SMTP (unless simulated failure is requested)
     if (-not $Script:SimulateSmtpFailure) {
-        if (Invoke-SmtpDelivery -ReportJson $ReportJson -FileName $FileName) { return }
+        if (Invoke-SmtpDelivery -JsonFilePath $JsonFilePath -HtmlFilePath $HtmlFilePath) { return }
     }
     else {
         Write-AgentLog -Level 'WARN' -Message 'SimulateSmtpFailure is active - bypassing SMTP delivery.'
     }
 
     # Priority 3: Local Cache (last resort)
-    $null = Invoke-LocalCache -ReportJson $ReportJson -FileName $FileName
+    $null = Invoke-LocalCache -JsonFilePath $JsonFilePath -HtmlFilePath $HtmlFilePath
+}
+
+#endregion
+
+#region --- HTML Dashboard Compilation ---
+
+function Export-PatchHtml {
+    <#
+    .SYNOPSIS
+        Compiles the historical run data into a premium static HTML dashboard.
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        $HistoryData,
+
+        [Parameter(Mandatory)]
+        [string]$HtmlFilePath
+    )
+
+    $HistoryJson = ConvertTo-Json -InputObject $HistoryData -Depth 10 -Compress
+
+    $HtmlContent = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PatchStateAgent Dashboard - $($HistoryData.computer_name)</title>
+    <style>
+        :root {
+            --bg-color: #080c14;
+            --panel-bg: #111827;
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --color-added: #10b981;
+            --color-removed: #f43f5e;
+            --color-total: #3b82f6;
+            --glow-added: rgba(16, 185, 129, 0.15);
+            --glow-removed: rgba(244, 63, 94, 0.15);
+            --glow-total: rgba(59, 130, 246, 0.15);
+            --font-stack: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 50% 0%, #1e1b4b 0%, transparent 60%),
+                radial-gradient(circle at 0% 100%, #0f172a 0%, transparent 60%);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            font-family: var(--font-stack);
+            min-height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: 320px;
+            background-color: var(--panel-bg);
+            border-right: 1px solid var(--panel-border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        .sidebar-header h2 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .sidebar-header p {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .run-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .run-item {
+            padding: 1rem;
+            border-radius: 12px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            background: rgba(255, 255, 255, 0.01);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .run-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.04);
+        }
+
+        .run-item.active {
+            background: rgba(59, 130, 246, 0.08);
+            border-color: rgba(59, 130, 246, 0.3);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
+        }
+
+        .run-date {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .run-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.375rem;
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .badge-count {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-weight: 700;
+        }
+
+        .badge-count.added { color: var(--color-added); }
+        .badge-count.removed { color: var(--color-removed); }
+
+        /* Main Content Viewport */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .content-header {
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid var(--panel-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: rgba(17, 24, 39, 0.4);
+            backdrop-filter: blur(8px);
+        }
+
+        .header-meta h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .header-meta p {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .badge-tag {
+            background: rgba(139, 92, 246, 0.12);
+            color: #c084fc;
+            border: 1px solid rgba(139, 92, 246, 0.25);
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        /* Metrics Cards */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            padding: 2rem 2rem 1rem 2rem;
+        }
+
+        .metric-card {
+            background: rgba(17, 24, 39, 0.6);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            padding: 1.25rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+        }
+
+        .metric-card.added::before { background: var(--color-added); }
+        .metric-card.removed::before { background: var(--color-removed); }
+        .metric-card.total::before { background: var(--color-total); }
+
+        .metric-card.added:hover { box-shadow: 0 8px 24px var(--glow-added); }
+        .metric-card.removed:hover { box-shadow: 0 8px 24px var(--glow-removed); }
+        .metric-card.total:hover { box-shadow: 0 8px 24px var(--glow-total); }
+
+        .metric-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 2.25rem;
+            font-weight: 800;
+            margin-top: 0.5rem;
+        }
+
+        .metric-card.added .metric-value { color: var(--color-added); }
+        .metric-card.removed .metric-value { color: var(--color-removed); }
+        .metric-card.total .metric-value { color: var(--color-total); }
+
+        /* System Resources Panel */
+        .resources-panel {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            padding: 0 2rem 1.5rem 2rem;
+        }
+
+        .resource-card {
+            background: rgba(17, 24, 39, 0.6);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            padding: 1.25rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .resource-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .resource-header h3 {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        .resource-value {
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .resource-text {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .resource-subtext {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .progress-bar-bg {
+            background: rgba(255, 255, 255, 0.05);
+            height: 8px;
+            border-radius: 999px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            margin-top: 0.25rem;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            border-radius: 999px;
+            width: 0%;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .ram-fill { background: linear-gradient(to right, #3b82f6, #8b5cf6); }
+        .storage-fill { background: linear-gradient(to right, #eab308, #f97316); }
+
+        /* Table & Filters Section */
+        .table-section {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 2rem 2rem 2rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .table-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .search-container {
+            position: relative;
+            width: 320px;
+        }
+
+        .search-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            padding: 0.625rem 1rem 0.625rem 2.25rem;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            pointer-events: none;
+            width: 16px;
+            height: 16px;
+        }
+
+        .filter-tabs {
+            display: flex;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 0.25rem;
+            border-radius: 10px;
+            border: 1px solid var(--panel-border);
+        }
+
+        .filter-tab {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0.5rem 1.25rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .filter-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .filter-tab.active {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+        }
+
+        .table-container {
+            border: 1px solid var(--panel-border);
+            border-radius: 12px;
+            overflow: hidden;
+            background-color: rgba(17, 24, 39, 0.4);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 1rem 1.5rem;
+        }
+
+        td {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--panel-border);
+            font-size: 0.875rem;
+            color: var(--text-primary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .kb-cell {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .kb-link {
+            color: #60a5fa;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .kb-link:hover {
+            color: #93c5fd;
+            text-decoration: underline;
+        }
+
+        .copy-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.25rem;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .copy-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .badge-action {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.25rem 0.625rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .badge-added {
+            background: rgba(16, 185, 129, 0.12);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .badge-removed {
+            background: rgba(239, 68, 68, 0.12);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+
+        .installed-date {
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
+
+        .empty-state {
+            padding: 4rem 2rem;
+            text-align: center;
+            color: var(--text-secondary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .empty-state h3 {
+            color: var(--text-primary);
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+
+        /* Footer styling */
+        footer {
+            text-align: center;
+            padding: 1rem 0;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--panel-border);
+            margin-top: auto;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Run History Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>PatchStateAgent</h2>
+            <p>Historical Run List</p>
+        </div>
+        <div class="run-list" id="run-list">
+            <!-- Dynamic Sidebar Items -->
+        </div>
+    </div>
+
+    <!-- Main Panel -->
+    <div class="main-content">
+        <div class="content-header">
+            <div class="header-meta">
+                <h1 id="selected-host">$($HistoryData.computer_name)</h1>
+                <p id="selected-time">Loading run details...</p>
+            </div>
+            <span class="badge-tag">$($HistoryData.tag)</span>
+        </div>
+
+        <!-- Metrics cards -->
+        <section class="metrics-grid">
+            <div class="metric-card added">
+                <span class="metric-label">Patches Added</span>
+                <span class="metric-value" id="count-added">0</span>
+            </div>
+            <div class="metric-card removed">
+                <span class="metric-label">Patches Removed</span>
+                <span class="metric-value" id="count-removed">0</span>
+            </div>
+            <div class="metric-card total">
+                <span class="metric-label">Total Active Patches</span>
+                <span class="metric-value" id="count-total">0</span>
+            </div>
+        </section>
+
+        <!-- System Resources Section -->
+        <section class="resources-panel" id="resources-panel" style="display: none;">
+            <div class="resource-card">
+                <div class="resource-header">
+                    <h3>Operating System</h3>
+                </div>
+                <div class="resource-body">
+                    <p id="os-info" class="resource-text">-</p>
+                    <p id="cpu-info" class="resource-subtext">-</p>
+                </div>
+            </div>
+            <div class="resource-card">
+                <div class="resource-header">
+                    <h3>Memory (RAM)</h3>
+                    <span id="ram-text" class="resource-value">-</span>
+                </div>
+                <div class="resource-body">
+                    <div class="progress-bar-bg">
+                        <div id="ram-bar" class="progress-bar-fill ram-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="resource-card">
+                <div class="resource-header">
+                    <h3>Storage (C:)</h3>
+                    <span id="storage-text" class="resource-value">-</span>
+                </div>
+                <div class="resource-body">
+                    <div class="progress-bar-bg">
+                        <div id="storage-bar" class="progress-bar-fill storage-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Filters & Table Section -->
+        <section class="table-section">
+            <div class="table-controls">
+                <div class="search-container">
+                    <svg class="search-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width:16px;height:16px;">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <input type="text" id="search-bar" class="search-input" placeholder="Search by KB ID...">
+                </div>
+                <div class="filter-tabs">
+                    <button class="filter-tab active" data-filter="all">All Diffs</button>
+                    <button class="filter-tab" data-filter="added">Added</button>
+                    <button class="filter-tab" data-filter="removed">Removed</button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table id="diff-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 45%;">Hotfix / Knowledge Base</th>
+                            <th style="width: 25%;">Action</th>
+                            <th style="width: 30%;">Installation Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Dynamic rows -->
+                    </tbody>
+                </table>
+                <div id="empty-state" class="empty-state" style="display: none;">
+                    <h3>No patch diffs found</h3>
+                    <p>There are no additions or removals in this execution block, or search filters returned no matches.</p>
+                </div>
+            </div>
+
+            <footer>
+                PatchStateAgent - System Integrity Monitoring - Local execution approved.
+            </footer>
+        </section>
+    </div>
+
+    <script>
+        const historyData = $HistoryJson;
+
+        const runListContainer = document.getElementById('run-list');
+        const selectedTimeText = document.getElementById('selected-time');
+        const countAddedText = document.getElementById('count-added');
+        const countRemovedText = document.getElementById('count-removed');
+        const countTotalText = document.getElementById('count-total');
+        const tableBody = document.getElementById('table-body');
+        const emptyState = document.getElementById('empty-state');
+        const searchBar = document.getElementById('search-bar');
+        const filterTabs = document.querySelectorAll('.filter-tab');
+        
+        // Resource elements
+        const resourcesPanel = document.getElementById('resources-panel');
+        const osInfoText = document.getElementById('os-info');
+        const cpuInfoText = document.getElementById('cpu-info');
+        const ramValueText = document.getElementById('ram-text');
+        const ramBarFill = document.getElementById('ram-bar');
+        const storageValueText = document.getElementById('storage-text');
+        const storageBarFill = document.getElementById('storage-bar');
+
+        let activeRunIndex = -1;
+        let currentFilter = 'all';
+        let searchQuery = '';
+
+        // Formats ISO timestamp to human readable local string
+        function formatDate(isoString) {
+            if (!isoString) return 'Unknown';
+            try {
+                const date = new Date(isoString);
+                return date.toLocaleString(undefined, { 
+                    dateStyle: 'medium', 
+                    timeStyle: 'short' 
+                });
+            } catch(e) {
+                return isoString;
+            }
+        }
+
+        // Render left sidebar list
+        function renderSidebar() {
+            const runs = historyData.history || [];
+            if (runs.length === 0) {
+                runListContainer.innerHTML = '<div style="padding:1rem;color:var(--text-secondary);text-align:center;font-size:0.875rem;">No historical data available</div>';
+                return;
+            }
+
+            // Render from latest to oldest
+            let html = '';
+            for (let i = runs.length - 1; i >= 0; i--) {
+                const run = runs[i];
+                const activeClass = i === activeRunIndex ? 'active' : '';
+                html += '<div class="run-item ' + activeClass + '" onclick="selectRun(' + i + ')">' +
+                            '<div class="run-date">' + formatDate(run.timestamp) + '</div>' +
+                            '<div class="run-meta">' +
+                                '<span class="badge-count added">+' + run.summary.added + '</span>' +
+                                '<span class="badge-count removed">-' + run.summary.removed + '</span>' +
+                                '<span>Total: ' + run.summary.total + '</span>' +
+                            '</div>' +
+                        '</div>';
+            }
+            runListContainer.innerHTML = html;
+        }
+
+        // Select a run from the sidebar
+        window.selectRun = function(index) {
+            activeRunIndex = index;
+            renderSidebar();
+            renderRunDetails(index);
+        }
+
+        // Render detail content area
+        function renderRunDetails(index) {
+            const runs = historyData.history || [];
+            const run = runs[index];
+            if (!run) {
+                selectedTimeText.innerText = 'No run selected';
+                resourcesPanel.style.display = 'none';
+                return;
+            }
+
+            selectedTimeText.innerText = formatDate(run.timestamp);
+            countAddedText.innerText = run.summary.added;
+            countRemovedText.innerText = run.summary.removed;
+            countTotalText.innerText = run.summary.total;
+
+            // Render resources if present
+            if (run.system_metrics) {
+                resourcesPanel.style.display = 'grid';
+                osInfoText.innerText = run.system_metrics.os_name + ' (Build ' + run.system_metrics.os_build + ')';
+                cpuInfoText.innerText = run.system_metrics.cpu_name + ' (' + run.system_metrics.cpu_cores + ' cores)';
+                
+                const ramTotal = run.system_metrics.ram_total_gb;
+                const ramUsed = run.system_metrics.ram_used_gb;
+                const ramPct = Math.round((ramUsed / ramTotal) * 100);
+                ramValueText.innerText = ramUsed + ' GB / ' + ramTotal + ' GB (' + ramPct + '%)';
+                ramBarFill.style.width = ramPct + '%';
+
+                const storageTotal = run.system_metrics.storage_total;
+                const storageUsed = run.system_metrics.storage_used;
+                const storagePct = run.system_metrics.storage_pct;
+                storageValueText.innerText = storageUsed + ' GB / ' + storageTotal + ' GB (' + storagePct + '%)';
+                storageBarFill.style.width = storagePct + '%';
+            } else {
+                resourcesPanel.style.display = 'none';
+            }
+
+            renderTableRows(run.diff || []);
+        }
+
+        // Render table rows for selected run
+        function renderTableRows(diffList) {
+            const filtered = diffList.filter(item => {
+                const matchesFilter = currentFilter === 'all' || item.action === currentFilter;
+                const matchesSearch = item.kb_id.toLowerCase().includes(searchQuery.toLowerCase());
+                return matchesFilter && matchesSearch;
+            });
+
+            if (filtered.length === 0) {
+                tableBody.innerHTML = '';
+                emptyState.style.display = 'flex';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            let rowsHtml = '';
+            for (let i = 0; i < filtered.length; i++) {
+                const item = filtered[i];
+                const badgeClass = item.action === 'added' ? 'badge-added' : 'badge-removed';
+                const actionText = item.action === 'added' ? 'Added' : 'Removed';
+                const actionIcon = item.action === 'added' 
+                    ? '<svg style="width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>'
+                    : '<svg style="width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15" /></svg>';
+
+                const dateStr = item.installed_on ? item.installed_on : 'Unknown';
+                const cleanKbId = item.kb_id.replace(/\D/g, '');
+
+                rowsHtml += '<tr>' +
+                            '<td>' +
+                                '<div class="kb-cell">' +
+                                    '<a href="https://support.microsoft.com/help/' + cleanKbId + '" target="_blank" class="kb-link">' + item.kb_id + '</a>' +
+                                    '<button class="copy-btn" onclick="copyToClipboard(\'' + item.kb_id + '\', this)" title="Copy KB ID">' +
+                                        '<svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2" viewBox="0 0 24 24">' +
+                                            '<path stroke-linecap="round" stroke-linejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.057 1.123-.08M15.75 18H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08M15.75 18.75v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5A3.375 3.375 0 006.375 7.5H5.25m11.9-3.664A2.251 2.251 0 0015 2.25h-1.5a2.251 2.251 0 00-2.15 1.586m5.8 0c.065.21.1.433.1.664v.75h-6V4.5c0-.231.035-.454.1-.664M6.75 7.5H4.875c-.621 0-1.125.504-1.125 1.125v12c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V16.5a9 9 0 00-9-9z" />' +
+                                        '</svg>' +
+                                    '</button>' +
+                                '</div>' +
+                            '</td>' +
+                            '<td>' +
+                                '<span class="badge-action ' + badgeClass + '">' +
+                                    actionIcon +
+                                    ' <span style="margin-left: 0.25rem;">' + actionText + '</span>' +
+                                '</span>' +
+                            '</td>' +
+                            '<td class="installed-date">' + dateStr + '</td>' +
+                          '</tr>';
+            }
+            tableBody.innerHTML = rowsHtml;
+        }
+
+        // Copy KB ID to clipboard
+        window.copyToClipboard = function(text, btn) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<svg style="width:14px;height:14px;fill:none;stroke:#10b981;stroke-width:2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>';
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                }, 1000);
+            }).catch(err => {
+                console.error('Could not copy text: ', err);
+            });
+        }
+
+        // Search hook
+        searchBar.addEventListener('input', (e) => {
+            searchQuery = e.target.value;
+            const runs = historyData.history || [];
+            const run = runs[activeRunIndex];
+            if (run) {
+                renderTableRows(run.diff || []);
+            }
+        });
+
+        // Tabs hook
+        filterTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                filterTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentFilter = tab.getAttribute('data-filter');
+                const runs = historyData.history || [];
+                const run = runs[activeRunIndex];
+                if (run) {
+                    renderTableRows(run.diff || []);
+                }
+            });
+        });
+
+        // Initialize display to latest run
+        const totalRuns = (historyData.history || []).length;
+        if (totalRuns > 0) {
+            selectRun(totalRuns - 1);
+        } else {
+            renderSidebar();
+        }
+    </script>
+</body>
+</html>
+"@
+
+    $HtmlContent | Out-File -FilePath $HtmlFilePath -Encoding UTF8 -Force
 }
 
 #endregion
@@ -689,8 +1592,7 @@ if (-not $global:PatchStateAgentTestMode) {
         $CurrentState = Get-PatchState
 
         # Step 5: Compute diff and build report
-        $Report     = Compare-PatchState -CurrentState $CurrentState -PreviousState $PreviousState
-        $ReportJson = ConvertTo-Json -InputObject $Report -Depth 10
+        $Report = Compare-PatchState -CurrentState $CurrentState -PreviousState $PreviousState
 
         # Step 6: Persist current state atomically
         #   a. Archive current -> previous (for next run's comparison)
@@ -704,8 +1606,56 @@ if (-not $global:PatchStateAgentTestMode) {
         $LatestReportFile = Join-Path $Script:StateDir 'patch_report.json'
         Write-StateFile -FilePath $LatestReportFile -Data $Report
 
-        # Step 7: Transmit report via cascading transport
-        Send-PatchReport -ReportJson $ReportJson
+        # Step 7: Load, Update, and Compile historical dashboard
+        $HistoryJsonFile = Join-Path $Script:StateDir "$($env:COMPUTERNAME)-report.json"
+        $HistoryHtmlFile = Join-Path $Script:StateDir "$($env:COMPUTERNAME)-dashboard.html"
+
+        $HistoryData = @{
+            computer_name = $env:COMPUTERNAME
+            tag           = (Get-RegistryConfig -ValueName 'ServerTag' -DefaultValue 'Untagged')
+            history       = @()
+        }
+
+        if (Test-PathExists -Path $HistoryJsonFile) {
+            try {
+                $RawJson = Get-Content -Raw -Path $HistoryJsonFile -ErrorAction Stop
+                $Parsed  = ConvertFrom-Json -InputObject $RawJson -ErrorAction Stop
+                if ($Parsed -and $Parsed.history) {
+                    $HistoryData.history = @($Parsed.history)
+                }
+            }
+            catch {
+                Write-AgentLog -Level 'WARN' -Message "History file was corrupt, recreating. Error: $_"
+            }
+        }
+
+        # Create new run entry with system resource metrics
+        $NewRunReport = [PSCustomObject]@{
+            timestamp             = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+            orchestrator_override = $false
+            summary               = $Report.summary
+            diff                  = $Report.diff
+            system_metrics        = (Get-SystemMetrics)
+        }
+
+        # Append and trim history to last 30 runs
+        $HistoryList = [System.Collections.Generic.List[PSCustomObject]]::new()
+        foreach ($Item in $HistoryData.history) {
+            $HistoryList.Add($Item)
+        }
+        $HistoryList.Add($NewRunReport)
+
+        while ($HistoryList.Count -gt 30) {
+            $HistoryList.RemoveAt(0)
+        }
+        $HistoryData.history = $HistoryList.ToArray()
+
+        # Save historical reports
+        Write-StateFile -FilePath $HistoryJsonFile -Data $HistoryData
+        Export-PatchHtml -HistoryData $HistoryData -HtmlFilePath $HistoryHtmlFile
+
+        # Step 8: Transmit report files via cascading transport
+        Send-PatchReport -JsonFilePath $HistoryJsonFile -HtmlFilePath $HistoryHtmlFile
 
         Write-AgentLog -Level 'INFO' -Message "===== $Script:AgentName run completed successfully ====="
     }
@@ -722,3 +1672,4 @@ if (-not $global:PatchStateAgentTestMode) {
         exit 1
     }
 }
+
