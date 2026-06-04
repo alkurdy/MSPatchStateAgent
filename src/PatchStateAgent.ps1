@@ -86,12 +86,12 @@ function Write-AgentLog {
     # --- File logging with rotation ---
     try {
         # Self-heal: ensure directory exists
-        if (-not (Test-Path $Script:LogsDir)) {
-            $null = New-Item -Path $Script:LogsDir -ItemType Directory -Force
+        if (-not (Test-PathExists -Path $Script:LogsDir)) {
+            $null = New-Directory -Path $Script:LogsDir
         }
 
         # Rotate if log exceeds size limit
-        if (Test-Path $Script:LogFile) {
+        if (Test-PathExists -Path $Script:LogFile) {
             $LogItem = Get-Item -Path $Script:LogFile -ErrorAction SilentlyContinue
             if ($LogItem -and $LogItem.Length -gt $Script:MaxLogSizeBytes) {
                 $OldLog = Join-Path $Script:LogsDir "agent.log.old"
@@ -134,6 +134,35 @@ function Write-AgentLog {
 
 #endregion
 
+#region --- Low-Level OS Abstraction (Wrapper Helpers) ---
+
+function Test-PathExists {
+    param([string]$Path)
+    return Test-Path -Path $Path
+}
+
+function New-Directory {
+    param([string]$Path)
+    return New-Item -Path $Path -ItemType Directory -Force
+}
+
+function Get-RegistryValue {
+    param([string]$Path, [string]$Name)
+    $Prop = Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue
+    if ($null -ne $Prop) { return $Prop.$Name }
+    return $null
+}
+
+function Set-RegistryValue {
+    param([string]$Path, [string]$Name, $Value, [string]$Type = 'String')
+    if (-not (Test-Path -Path $Path)) {
+        $null = New-Item -Path $Path -Force
+    }
+    Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -Force
+}
+
+#endregion
+
 #region --- Initialize-Environment ---
 
 function Initialize-Environment {
@@ -156,9 +185,9 @@ function Initialize-Environment {
     )
 
     foreach ($Path in $RequiredPaths) {
-        if (-not (Test-Path -Path $Path)) {
+        if (-not (Test-PathExists -Path $Path)) {
             try {
-                $null = New-Item -Path $Path -ItemType Directory -Force -ErrorAction Stop
+                $null = New-Directory -Path $Path -ErrorAction Stop
                 Write-AgentLog -Level 'INFO' -Message "Provisioned missing directory: $Path"
             }
             catch {
@@ -190,12 +219,8 @@ function Get-RegistryConfig {
     )
 
     try {
-        if (Test-Path -Path $Script:RegConfig) {
-            $Prop = Get-ItemProperty -Path $Script:RegConfig -Name $ValueName -ErrorAction SilentlyContinue
-            if ($null -ne $Prop -and $null -ne $Prop.$ValueName) {
-                return $Prop.$ValueName
-            }
-        }
+        $Val = Get-RegistryValue -Path $Script:RegConfig -Name $ValueName
+        if ($null -ne $Val) { return $Val }
     }
     catch {
         Write-AgentLog -Level 'WARN' -Message "Registry read failed for '$ValueName', using default. Error: $_"
@@ -224,15 +249,15 @@ function Test-OrchestratorOverride {
     param ()
 
     try {
-        if (-not (Test-Path -Path $Script:RegRoot)) {
+        if (-not (Test-PathExists -Path $Script:RegRoot)) {
             return $false
         }
 
-        $Prop = Get-ItemProperty -Path $Script:RegRoot -Name 'OrchestratorTriggered' -ErrorAction SilentlyContinue
+        $Val = Get-RegistryValue -Path $Script:RegRoot -Name 'OrchestratorTriggered'
 
-        if ($null -ne $Prop -and $Prop.OrchestratorTriggered -eq 1) {
+        if ($null -ne $Val -and $Val -eq 1) {
             # Reset flag immediately (before any other work) to prevent permanent lockout
-            Set-ItemProperty -Path $Script:RegRoot -Name 'OrchestratorTriggered' -Value 0 -Type DWord -ErrorAction SilentlyContinue
+            Set-RegistryValue -Path $Script:RegRoot -Name 'OrchestratorTriggered' -Value 0 -Type DWord -ErrorAction SilentlyContinue
             Write-AgentLog -Level 'WARN' -Message 'Orchestrator override flag detected. Skipping this execution cycle. Flag reset to 0.'
             return $true
         }
@@ -274,14 +299,14 @@ function Get-PatchState {
             # Timed out - kill the job and return empty
             Stop-Job  -Job $Job -ErrorAction SilentlyContinue
             Write-AgentLog -Level 'ERROR' -Message "Get-HotFix timed out after $($Script:HotFixTimeoutSec)s. WMI/CIM may be unresponsive."
-            return @()
+            return , @()
         }
 
         $RawHotFixes = Receive-Job -Job $Job -ErrorAction SilentlyContinue
 
         if (-not $RawHotFixes) {
             Write-AgentLog -Level 'WARN' -Message 'Get-HotFix returned no results.'
-            return @()
+            return , @()
         }
 
         # Extract only the fields we care about; normalise InstalledOn to ISO date string
@@ -324,20 +349,20 @@ function Read-StateFile {
     )
 
     if (-not (Test-Path -Path $FilePath)) {
-        return @()
+        return , @()
     }
 
     try {
         $RawJson = Get-Content -Raw -Path $FilePath -ErrorAction Stop
         $Parsed  = ConvertFrom-Json -InputObject $RawJson -ErrorAction Stop
-        return @($Parsed)
+        return , @($Parsed)
     }
     catch {
         # Archive corrupt file so a human can inspect it later
         $ArchiveName = "$FilePath.corrupt.$(Get-Date -Format 'yyyyMMddHHmmss')"
         Rename-Item -Path $FilePath -NewName $ArchiveName -Force -ErrorAction SilentlyContinue
         Write-AgentLog -Level 'WARN' -Message "State file '$FilePath' was corrupt and has been archived as '$ArchiveName'. Starting fresh."
-        return @()
+        return , @()
     }
 }
 
@@ -368,7 +393,7 @@ function Write-StateFile {
     catch {
         Write-AgentLog -Level 'ERROR' -Message "Atomic state write failed for '$FilePath': $_"
         # Clean up temp file if it was created
-        if (Test-Path $TempFile) { Remove-Item -Path $TempFile -Force -ErrorAction SilentlyContinue }
+        if (Test-PathExists -Path $TempFile) { Remove-Item -Path $TempFile -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -438,9 +463,9 @@ function Compare-PatchState {
         tag                   = (Get-RegistryConfig -ValueName 'ServerTag' -DefaultValue 'Untagged')
         orchestrator_override = $false
         summary               = [PSCustomObject]@{
-            added   = ($DiffList | Where-Object { $_.action -eq 'added' }).Count
-            removed = ($DiffList | Where-Object { $_.action -eq 'removed' }).Count
-            total   = $CurrentKbs.Count
+            added   = @($DiffList | Where-Object { $_.action -eq 'added' }).Count
+            removed = @($DiffList | Where-Object { $_.action -eq 'removed' }).Count
+            total   = @($CurrentState).Count
         }
         diff                  = $DiffList.ToArray()
     }
@@ -645,57 +670,55 @@ function Send-PatchReport {
 
 #endregion
 
-#region --- Main Execution Block ---
-
-try {
-    Write-AgentLog -Level 'INFO' -Message "===== $Script:AgentName run started on $($env:COMPUTERNAME) ====="
-
-    # Step 1: Self-heal environment before doing anything else
-    Initialize-Environment
-
-    # Step 2: Honour orchestrator override (Windmill)
-    if (Test-OrchestratorOverride) {
-        exit 0
-    }
-
-    # Step 3: Load previous state (corruption-safe)
-    $PreviousState = Read-StateFile -FilePath $Script:PreviousStateFile
-
-    # Step 4: Capture current patch state (WMI-timeout-safe)
-    $CurrentState = Get-PatchState
-
-    # Step 5: Compute diff and build report
-    $Report     = Compare-PatchState -CurrentState $CurrentState -PreviousState $PreviousState
-    $ReportJson = ConvertTo-Json -InputObject $Report -Depth 10
-
-    # Step 6: Persist current state atomically
-    #   a. Archive current -> previous (for next run's comparison)
-    if (Test-Path $Script:CurrentStateFile) {
-        Write-StateFile -FilePath $Script:PreviousStateFile -Data (Read-StateFile -FilePath $Script:CurrentStateFile)
-    }
-    #   b. Write new current state
-    Write-StateFile -FilePath $Script:CurrentStateFile -Data $CurrentState
-
-    # Also persist the full report as patch_report.json (latest copy, for reference)
-    $LatestReportFile = Join-Path $Script:StateDir 'patch_report.json'
-    Write-StateFile -FilePath $LatestReportFile -Data $Report
-
-    # Step 7: Transmit report via cascading transport
-    Send-PatchReport -ReportJson $ReportJson
-
-    Write-AgentLog -Level 'INFO' -Message "===== $Script:AgentName run completed successfully ====="
-}
-catch {
-    # Outer safety net: any unhandled exception is logged and the script exits cleanly
-    # (Never crash silently - always leave a trace)
+if (-not $global:PatchStateAgentTestMode) {
     try {
-        Write-AgentLog -Level 'ERROR' -Message "Unhandled fatal exception in $Script:AgentName run: $_"
+        Write-AgentLog -Level 'INFO' -Message "===== $Script:AgentName run started on $($env:COMPUTERNAME) ====="
+
+        # Step 1: Self-heal environment before doing anything else
+        Initialize-Environment
+
+        # Step 2: Honour orchestrator override (Windmill)
+        if (Test-OrchestratorOverride) {
+            exit 0
+        }
+
+        # Step 3: Load previous state (corruption-safe)
+        $PreviousState = Read-StateFile -FilePath $Script:PreviousStateFile
+
+        # Step 4: Capture current patch state (WMI-timeout-safe)
+        $CurrentState = Get-PatchState
+
+        # Step 5: Compute diff and build report
+        $Report     = Compare-PatchState -CurrentState $CurrentState -PreviousState $PreviousState
+        $ReportJson = ConvertTo-Json -InputObject $Report -Depth 10
+
+        # Step 6: Persist current state atomically
+        #   a. Archive current -> previous (for next run's comparison)
+        if (Test-PathExists -Path $Script:CurrentStateFile) {
+            Write-StateFile -FilePath $Script:PreviousStateFile -Data (Read-StateFile -FilePath $Script:CurrentStateFile)
+        }
+        #   b. Write new current state
+        Write-StateFile -FilePath $Script:CurrentStateFile -Data $CurrentState
+
+        # Also persist the full report as patch_report.json (latest copy, for reference)
+        $LatestReportFile = Join-Path $Script:StateDir 'patch_report.json'
+        Write-StateFile -FilePath $LatestReportFile -Data $Report
+
+        # Step 7: Transmit report via cascading transport
+        Send-PatchReport -ReportJson $ReportJson
+
+        Write-AgentLog -Level 'INFO' -Message "===== $Script:AgentName run completed successfully ====="
     }
     catch {
-        # If even logging fails, last resort: write to stderr
-        Write-Error "FATAL: $Script:AgentName crashed and logging failed. Error: $_"
+        # Outer safety net: any unhandled exception is logged and the script exits cleanly
+        # (Never crash silently - always leave a trace)
+        try {
+            Write-AgentLog -Level 'ERROR' -Message "Unhandled fatal exception in $Script:AgentName run: $_"
+        }
+        catch {
+            # If even logging fails, last resort: write to stderr
+            Write-Error "FATAL: $Script:AgentName crashed and logging failed. Error: $_"
+        }
+        exit 1
     }
-    exit 1
 }
-
-#endregion
