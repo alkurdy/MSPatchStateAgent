@@ -1924,7 +1924,7 @@ function Export-PatchHtml {
 
 #endregion
 
-if (-not $global:PatchStateAgentTestMode) {
+if (-not (Get-Variable -Name PatchStateAgentTestMode -Scope Global -ValueOnly -ErrorAction SilentlyContinue)) {
     try {
         Write-AgentLog -Level 'INFO' -Message "===== $Script:AgentName run started on $($env:COMPUTERNAME) ====="
 
