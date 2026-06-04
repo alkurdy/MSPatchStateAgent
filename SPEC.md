@@ -1,6 +1,6 @@
 # Technical Specification: PatchStateAgent (PSA)
 
-`PatchStateAgent` is a robust, lightweight PowerShell-based AI agent designed to capture Windows server patch states like Git commits, compute diffs, and export structured JSON data to a centralized location.
+`PatchStateAgent` is a robust, lightweight PowerShell-based monitoring agent designed to capture Windows server patch states like Git commits, compute diffs, and export structured JSON data to a centralized location.
 
 ## 1. Core Philosophy (KISS)
 
