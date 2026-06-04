@@ -332,3 +332,12 @@ Describe 'Initialize-Environment - Self-Healing Directory Provisioning' -Tag 'Un
         Assert-MockCalled New-Directory -Times 0 -Scope It
     }
 }
+
+Describe 'Script Parameter - BypassOrchestratorCheck' -Tag 'Unit' {
+    It 'Should expose the BypassOrchestratorCheck switch parameter' {
+        $AgentScript = (Resolve-Path (Join-Path $PSScriptRoot '..\src\PatchStateAgent.ps1')).Path
+        $Ast = [System.Management.Automation.Language.Parser]::ParseFile($AgentScript, [ref]$null, [ref]$null)
+        $Params = $Ast.ParamBlock.Parameters.Name.VariablePath.UserPath
+        ($Params -contains 'BypassOrchestratorCheck') | Should Be $true
+    }
+}

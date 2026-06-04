@@ -19,6 +19,17 @@ MSPatchStateAgent/
     └── PatchStateAgent.Tests.ps1 # Pester Unit Tests skeleton
 ```
 
-## Setup & Testing Quickstart
+## Usage & Parameters
 
-See [SPEC.md](SPEC.md) for full architecture, parameters, registry configuration keys, and transport fallback strategies.
+The agent can be executed manually or as a scheduled task:
+
+```powershell
+& .\src\PatchStateAgent.ps1 [-SimulateSmbFailure] [-SimulateSmtpFailure] [-BypassOrchestratorCheck]
+```
+
+### Core Parameters
+- `-SimulateSmbFailure`: Forces the SMB upload to fail to verify the SMTP fallback transmission path.
+- `-SimulateSmtpFailure`: Forces the SMTP delivery to fail to verify local cache fallback writing.
+- `-BypassOrchestratorCheck`: Forces execution of the agent even if the cooperative registry semaphore (`OrchestratorTriggered = 1`) is active. This should be used by external orchestrators (like Windmill or Ansible) to ensure direct runs always execute to completion.
+
+For full architectural details, registry configuration keys, and transport fallback strategies, see [SPEC.md](SPEC.md).

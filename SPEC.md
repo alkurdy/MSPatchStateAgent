@@ -65,6 +65,7 @@ To prevent local Windows Scheduled Tasks from overlapping with active Windmill o
 
 * The agent reads `HKLM:\SOFTWARE\PatchStateAgent\OrchestratorTriggered` (REG_DWORD / Boolean).
 * If `True` ($1$), the agent skips execution, resets the flag to `False` ($0$), and logs the event.
+* **Bypass Option:** The script supports a `-BypassOrchestratorCheck` switch parameter. When passed (e.g. during an orchestrator-led execution), the agent bypasses the `OrchestratorTriggered` check entirely, executing the run normally without skipping.
 
 ### 3.3 Cascading Transport Layer (Fail-Safe Strategy)
 

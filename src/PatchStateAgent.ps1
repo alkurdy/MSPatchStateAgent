@@ -26,7 +26,8 @@
 [CmdletBinding()]
 param (
     [switch]$SimulateSmbFailure,
-    [switch]$SimulateSmtpFailure
+    [switch]$SimulateSmtpFailure,
+    [switch]$BypassOrchestratorCheck
 )
 
 Set-StrictMode -Version Latest
@@ -505,6 +506,15 @@ function Compare-PatchState {
         computer_name         = $env:COMPUTERNAME
         tag                   = (Get-RegistryConfig -ValueName 'ServerTag' -DefaultValue 'Untagged')
         orchestrator_override = $false
+        destinations          = [PSCustomObject]@{
+            smb   = (Get-RegistryConfig -ValueName 'SmbPath' -DefaultValue 'Not Configured')
+            smtp  = if (Get-RegistryConfig -ValueName 'SmtpServer') { 
+                        "$((Get-RegistryConfig -ValueName 'SmtpServer')) (to: $((Get-RegistryConfig -ValueName 'SmtpTo')))" 
+                    } else { 
+                        'Not Configured' 
+                    }
+            local = $Script:StateDir
+        }
         summary               = [PSCustomObject]@{
             added   = @($DiffList | Where-Object { $_.action -eq 'added' }).Count
             removed = @($DiffList | Where-Object { $_.action -eq 'removed' }).Count
@@ -955,10 +965,9 @@ function Export-PatchHtml {
         .metric-card.removed .metric-value { color: var(--color-removed); }
         .metric-card.total .metric-value { color: var(--color-total); }
 
-        /* System Resources Panel */
         .resources-panel {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 1.5rem;
             padding: 0 2rem 1.5rem 2rem;
         }
@@ -1315,6 +1324,16 @@ function Export-PatchHtml {
                     </div>
                 </div>
             </div>
+            <div class="resource-card">
+                <div class="resource-header">
+                    <h3>Report Destinations</h3>
+                </div>
+                <div class="resource-body">
+                    <p id="dest-smb" class="resource-subtext" style="margin-top: 0;">SMB: -</p>
+                    <p id="dest-smtp" class="resource-subtext">SMTP: -</p>
+                    <p id="dest-local" class="resource-subtext">Local: -</p>
+                </div>
+            </div>
         </section>
 
         <!-- Filters & Table Section -->
@@ -1445,23 +1464,42 @@ function Export-PatchHtml {
             countRemovedText.innerText = run.summary.removed;
             countTotalText.innerText = run.summary.total;
 
-            // Render resources if present
-            if (run.system_metrics) {
+            // Render resources and destinations if present
+            const dests = run.destinations || historyData.destinations;
+            if (run.system_metrics || dests) {
                 resourcesPanel.style.display = 'grid';
-                osInfoText.innerText = run.system_metrics.os_name + ' (Build ' + run.system_metrics.os_build + ')';
-                cpuInfoText.innerText = run.system_metrics.cpu_name + ' (' + run.system_metrics.cpu_cores + ' cores)';
-                
-                const ramTotal = run.system_metrics.ram_total_gb;
-                const ramUsed = run.system_metrics.ram_used_gb;
-                const ramPct = Math.round((ramUsed / ramTotal) * 100);
-                ramValueText.innerText = ramUsed + ' GB / ' + ramTotal + ' GB (' + ramPct + '%)';
-                ramBarFill.style.width = ramPct + '%';
+                if (run.system_metrics) {
+                    osInfoText.innerText = run.system_metrics.os_name + ' (Build ' + run.system_metrics.os_build + ')';
+                    cpuInfoText.innerText = run.system_metrics.cpu_name + ' (' + run.system_metrics.cpu_cores + ' cores)';
+                    
+                    const ramTotal = run.system_metrics.ram_total_gb;
+                    const ramUsed = run.system_metrics.ram_used_gb;
+                    const ramPct = Math.round((ramUsed / ramTotal) * 100);
+                    ramValueText.innerText = ramUsed + ' GB / ' + ramTotal + ' GB (' + ramPct + '%)';
+                    ramBarFill.style.width = ramPct + '%';
 
-                const storageTotal = run.system_metrics.storage_total;
-                const storageUsed = run.system_metrics.storage_used;
-                const storagePct = run.system_metrics.storage_pct;
-                storageValueText.innerText = storageUsed + ' GB / ' + storageTotal + ' GB (' + storagePct + '%)';
-                storageBarFill.style.width = storagePct + '%';
+                    const storageTotal = run.system_metrics.storage_total;
+                    const storageUsed = run.system_metrics.storage_used;
+                    const storagePct = run.system_metrics.storage_pct;
+                    storageValueText.innerText = storageUsed + ' GB / ' + storageTotal + ' GB (' + storagePct + '%)';
+                    storageBarFill.style.width = storagePct + '%';
+                } else {
+                    osInfoText.innerText = '-';
+                    cpuInfoText.innerText = '-';
+                    ramValueText.innerText = '-';
+                    ramBarFill.style.width = '0%';
+                    storageValueText.innerText = '-';
+                    storageBarFill.style.width = '0%';
+                }
+
+                if (dests) {
+                    document.getElementById('dest-smb').innerText = 'SMB: ' + (dests.smb || 'Not Configured');
+                    document.getElementById('dest-smtp').innerText = 'SMTP: ' + (dests.smtp || 'Not Configured');
+                    document.getElementById('dest-local').innerText = 'Local: ' + (dests.local || '-');
+                    document.getElementById('dest-smb').title = dests.smb || '';
+                    document.getElementById('dest-smtp').title = dests.smtp || '';
+                    document.getElementById('dest-local').title = dests.local || '';
+                }
             } else {
                 resourcesPanel.style.display = 'none';
             }
@@ -1581,7 +1619,7 @@ if (-not $global:PatchStateAgentTestMode) {
         Initialize-Environment
 
         # Step 2: Honour orchestrator override (Windmill)
-        if (Test-OrchestratorOverride) {
+        if (-not $BypassOrchestratorCheck -and (Test-OrchestratorOverride)) {
             exit 0
         }
 
@@ -1613,6 +1651,15 @@ if (-not $global:PatchStateAgentTestMode) {
         $HistoryData = @{
             computer_name = $env:COMPUTERNAME
             tag           = (Get-RegistryConfig -ValueName 'ServerTag' -DefaultValue 'Untagged')
+            destinations  = [PSCustomObject]@{
+                smb   = (Get-RegistryConfig -ValueName 'SmbPath' -DefaultValue 'Not Configured')
+                smtp  = if (Get-RegistryConfig -ValueName 'SmtpServer') { 
+                            "$((Get-RegistryConfig -ValueName 'SmtpServer')) (to: $((Get-RegistryConfig -ValueName 'SmtpTo')))" 
+                        } else { 
+                            'Not Configured' 
+                        }
+                local = $Script:StateDir
+            }
             history       = @()
         }
 
